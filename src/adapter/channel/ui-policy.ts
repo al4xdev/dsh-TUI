@@ -178,6 +178,7 @@ export const CHANNEL_UI_PROPERTIES = [
   'configuredPreset',
   'configuredActivityFrames',
   'configuredLang',
+  'externalPlanCommand',
   'tokens',
   'mainCost',
   'subagentCost',
