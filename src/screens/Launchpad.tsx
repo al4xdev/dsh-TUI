@@ -23,6 +23,7 @@ import { stringWidth } from '../ink/stringWidth.js'
 import { isMod, isPlainReturn } from '../utils/modifiers.js'
 import { wordBoundaryLeft, wordBoundaryRight } from '../utils/inputWordBoundary.js'
 import { actionMatches } from '../utils/keymap.js'
+import { editInExternalEditor } from '../utils/externalEditor.js'
 import { formatClipboardInsert, readClipboard, type ClipboardRead } from '../utils/clipboard.js'
 import { imagePathMediaType, parsePastedImagePath, readBoundedRegularFile, stageClipboardFilePaths } from '../utils/pastedImagePath.js'
 import type { ChannelUi } from '../adapter/channel/ui-policy.js'
@@ -426,6 +427,7 @@ export function Launchpad({
   inputPaused = false,
   onParamPick,
   model,
+  provider,
   effort,
   preset,
   permission,
@@ -513,6 +515,7 @@ export function Launchpad({
    * 就整行不画（成组行矮一行，见 `resolveLaunchpadLayout` 的 `params`）。
    */
   model?: string | undefined
+  provider?: string | undefined
   effort?: string | undefined
   /** 当前 agent preset 的显示名（Standard/PTC/极简…）；缺省不画那一段。 */
   preset?: string | undefined
@@ -661,6 +664,10 @@ export function Launchpad({
           && (channel.stagedImageGeneration?.() ?? 0) === imageGeneration)),
     }
   }
+  const alexGrammarAbort = React.useRef<AbortController | null>(null)
+  const alexEditorBusy = React.useRef(false)
+  const alexGrammarUndo = React.useRef<string | null>(null)
+  React.useEffect(() => () => alexGrammarAbort.current?.abort(), [])
   /** 粘贴提示：落地页没有 toast 基础设施，借 Tips 行显示 4 秒（失败不能静默）。 */
   const [pasteNotice, setPasteNotice] = React.useState<string | undefined>(undefined)
   const noticeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -885,6 +892,56 @@ export function Launchpad({
     }
     const query = queryRef.current
     const caret = caretRef.current
+    if (alexEditorBusy.current) {
+      event?.stopImmediatePropagation()
+      if (key.escape || (key.ctrl && input === 'c')) alexGrammarAbort.current?.abort()
+      return
+    }
+    if (key.ctrl && !key.shift && input === 'z' && alexGrammarUndo.current !== null) {
+      event?.stopImmediatePropagation()
+      const previous = alexGrammarUndo.current
+      alexGrammarUndo.current = null
+      changeQuery(previous, previous.length)
+      return
+    }
+    const grammarPressed = input === 'g' && key.ctrl && !key.shift && !key.meta && !key.super
+    if (grammarPressed || actionMatches('editor', input, key)) {
+      event?.stopImmediatePropagation()
+      if (!query.trim() || (grammarPressed && query.startsWith('/'))) return
+      const grammar = (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as
+        | { fix: (text: string, current: { provider?: string; model?: string }, signal?: AbortSignal, onProgress?: (msg: string) => void) => Promise<string> }
+        | undefined
+      if (grammarPressed && !grammar) {
+        showPasteNotice('Grammar fixer unavailable.')
+        return
+      }
+      const original = query
+      const abort = new AbortController()
+      alexGrammarAbort.current = abort
+      alexEditorBusy.current = true
+      void (async () => {
+        try {
+          const outcome = grammarPressed
+            ? { kind: 'edited' as const, text: await grammar!.fix(original, { provider, model }, abort.signal, showPasteNotice) }
+            : await editInExternalEditor(original)
+          if (abort.signal.aborted || queryRef.current !== original) return
+          if (outcome.kind === 'edited') {
+            alexGrammarUndo.current = original
+            changeQuery(outcome.text, outcome.text.length)
+            showPasteNotice(grammarPressed ? 'Grammar corrected. Review before sending.' : 'Draft updated.')
+          } else showPasteNotice('External editor unavailable.')
+        } catch (error: unknown) {
+          if (!abort.signal.aborted) {
+            const err = error as { message?: string }
+            showPasteNotice(String(err?.message ?? error))
+          }
+        } finally {
+          alexGrammarAbort.current = null
+          alexEditorBusy.current = false
+        }
+      })()
+      return
+    }
     const composing = key.ctrl || key.meta || key.super
     // 终端原生粘贴（bracketed paste：Ctrl+Shift+V / 右键 / Shift+Insert）：
     // ink 把载荷标成 isPasted 交给 useInput；标记字节（\x1b[200~ / 201~）在

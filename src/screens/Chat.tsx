@@ -6937,6 +6937,7 @@ export function Chat({
         brand={brand}
         starred={starred}
         onStarClick={runStarAction}
+        provider={channel.provider}
         firstRun={onboardingPending}
         actions={launchpadActions}
         // 落地页没有 toast 区：最近一条 channel 通知借 Tips 行显示。
