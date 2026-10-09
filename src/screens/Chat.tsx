@@ -6147,6 +6147,7 @@ export function Chat({
         brand={brand}
         starred={starred}
         onStarClick={runStarAction}
+        provider={channel.provider}
         firstRun={onboardingPending}
         actions={launchpadActions}
         // 参数行四段点开的既有选择器（第五版）：pickerPanels 与聊天页共用

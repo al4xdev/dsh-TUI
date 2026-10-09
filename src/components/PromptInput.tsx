@@ -1226,6 +1226,8 @@ export function PromptInput({
   const clipboardBusyRef = React.useRef(false)
   /** True while the external editor owns the terminal (editor-key round-trip). */
   const editorBusyRef = React.useRef(false)
+  const grammarAbortRef = React.useRef<AbortController | null>(null)
+  React.useEffect(() => () => grammarAbortRef.current?.abort(), [])
   /** Enter dedupe window: cmd pipelines can deliver one Enter as `\r`+`\n`. */
   const lastEnterAtRef = React.useRef(0)
   React.useEffect(() => {
@@ -2318,7 +2320,13 @@ export function PromptInput({
     // The editor round-trip ends by resuming stdin one microtask before the
     // outcome lands — drop any key squeezed into that gap so the prompt's
     // setValue can never overwrite fresh typing (and vice versa).
-    if (editorBusyRef.current) return
+    if (editorBusyRef.current) {
+      if (grammarAbortRef.current && (key.escape || (key.ctrl && input === 'c'))) {
+        event?.stopImmediatePropagation()
+        grammarAbortRef.current.abort()
+      }
+      return
+    }
 
     // Ctrl+Shift+E (remappable via /settings): toggle the fullscreen draft
     // editor. Matched before anything else so it works both while editing
@@ -2617,6 +2625,44 @@ export function PromptInput({
     }
 
     // Ctrl+G (remappable via /settings): edit the current draft in
+    if (input === 'g' && key.ctrl && !key.shift && !key.meta && !key.super) {
+      event?.stopImmediatePropagation()
+      const grammar = (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as
+        | { fix: (text: string, current: { provider: string; model: string }, signal?: AbortSignal) => Promise<string> }
+        | undefined
+      if (!grammar) {
+        channel.notify('Grammar fixer unavailable in this profile.', { color: 'warning' })
+        return
+      }
+      if (!value.trim() || value.startsWith('/')) return
+      syncImageGeneration()
+      advanceDraftRevision()
+      const lease = captureDraftImageLease()
+      const abort = new AbortController()
+      grammarAbortRef.current = abort
+      editorBusyRef.current = true
+      void (async () => {
+        try {
+          const corrected = await grammar.fix(value, { provider: channel.provider, model: channel.model }, abort.signal)
+          if (!draftImageLeaseIsCurrent(lease) || abort.signal.aborted) return
+          const beforeBlock = foldBlockRef.current
+          updateFoldBlock(null)
+          setInput(corrected, corrected.length, 'step', beforeBlock)
+          setSelectedCommand(0)
+          setFileSelected(0)
+          channel.notify('Grammar corrected. Review before sending.')
+        } catch (error: unknown) {
+          if (draftImageLeaseIsCurrent(lease)) {
+            const err = error as { message?: string }
+            channel.notify(abort.signal.aborted ? 'Correction canceled; draft preserved.' : String(err?.message ?? error), { color: 'warning' })
+          }
+        } finally {
+          grammarAbortRef.current = null
+          editorBusyRef.current = false
+        }
+      })()
+      return
+    }
     // $VISUAL/$EDITOR (issue #123, readline's edit-and-execute-command). The
     // draft is written to a temp file, the terminal is handed to the editor
     // (Ink's alt-screen handoff), and the saved text replaces the input when
