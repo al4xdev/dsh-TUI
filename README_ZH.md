@@ -18,6 +18,27 @@
 
 # dsh-TUI
 
+### 托管计划插件接缝（本地源码扩展）
+
+插件配置 `externalPlanCommand: true` 让裸 `/plan` 调用注册命令而非原生选择器。
+默认 `false`，带参数形式不变。注册打开场景的替代命令前禁用原生 plan-mode。
+此开关不授予执行权限，也不实现持久化。
+
+场景收到 `ui.Markdown`、`ui.markdownSourceRange` 与 `ui.markdownSourceBlocks`，也可从
+`@deepseek-harness-tui/dsh-tui/ui` 导入。使用注入的宿主 React，传入
+`{ preserveSource: true, children: source }`，复用原生渲染器及回退。
+辅助函数选择从 1 开始的源行范围及引用文本；锚点需绑定不可变版本与哈希。
+可选 `sourceNavigation: { line, onSelect, commentLines, scrollRef }` 通过原生渲染器
+增加块光标及鼠标选择。列表项单独定位；图表、表格及段落保持完整源块。
+终端折行绝不作为源行。可滚动文档使用纵向 `ScrollBox`（`flexDirection: 'column'`）；
+使用滚动锚点时，Markdown 根节点应位于内容原点。
+展开后的托管计划工具卡用原生 Markdown 渲染人类可读结果；其他工具、错误视图、
+模型 JSON 与原生大小限制保持不变。
+本地托管计划场景用 `c` 添加/编辑评论，`Esc` 保存评论草稿。
+`d` 在删除草稿前要求 `y/n` 确认，保留审计记录。
+`O` 将当前计划以相同 ID 的新版本重新放入 staging（已在 staging 则不新增版本）。
+历史版本只读；重新打开的计划必须再次获得所有者批准，才能执行。
+
 > 面向 DeepSeek Harness 的交互式终端界面插件：像素鲸鱼顶栏、实时工作状态、流式思考展示、双击 Esc 时间回溯、上下文进度条与 TPS 仪表。
 > 零核心改动，纯插件挂载。安装即启用，卸载不留核心补丁。
 

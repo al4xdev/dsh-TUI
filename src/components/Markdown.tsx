@@ -13,6 +13,9 @@ import { CodeBlockFrame } from './CodeBlockFrame.js'
 import { MermaidDiagram } from './MermaidDiagram.js'
 import { InlineMathParagraph } from './InlineMathParagraph.js'
 import { MathBlock } from './MathBlock.js'
+import { markdownNavigationTokens, markdownTokenRanges, type MarkdownSourceRange } from '../markdown-source.js'
+import type { DOMElement } from '../ink/dom.js'
+import type { ScrollBoxHandle } from '../ink/components/ScrollBox.js'
 
 /**
  * Markdown 渲染组件：marked 分词 + ANSI 格式化。
@@ -27,8 +30,17 @@ import { MathBlock } from './MathBlock.js'
  * 路径，直接合成段落 token，省掉 lexer 调用。
  */
 
-type Props = {
+export type MarkdownProps = {
   children: string
+  /** Artifact mode: do not strip prompt XML tags from the immutable source. */
+  preserveSource?: boolean
+  /** Opt-in artifact navigation; selection identifies source blocks, not wrapped rows. */
+  sourceNavigation?: {
+    readonly line: number
+    readonly onSelect: (range: MarkdownSourceRange) => void
+    readonly commentLines?: readonly number[]
+    readonly scrollRef?: React.RefObject<ScrollBoxHandle | null>
+  }
   /** 为 true 时全部文本内容以 dim 样式呈现 */
   dimColor?: boolean
   /** 为 false 时跳过 token 缓存（流式尾部的内容逐帧变化，缓存必然失效） */
@@ -259,7 +271,27 @@ function renderTokensToNodes(
  * block — the dominant long-output stall (string-width via wrap-ansi, 60%+
  * of CPU in streaming profiles).
  */
-function MarkdownImpl({ children, dimColor = false, cacheTokens = true, inlineMathImages = true }: Props): React.ReactNode {
+function MarkdownSourceBlock({ range, navigation, children }: React.PropsWithChildren<{
+  range: MarkdownSourceRange
+  navigation: NonNullable<MarkdownProps['sourceNavigation']>
+}>): React.ReactNode {
+  const element = React.useRef<DOMElement>(null)
+  const selected = navigation.line >= range.startLine && navigation.line <= range.endLine
+  const commented = navigation.commentLines?.some(line => line >= range.startLine && line <= range.endLine)
+  React.useLayoutEffect(() => {
+    if (selected && element.current) navigation.scrollRef?.current?.scrollToElement(element.current)
+  }, [selected, navigation.scrollRef])
+  return (
+    <Box ref={element} flexDirection="row" flexShrink={0} onClick={() => navigation.onSelect(range)}>
+      <Box width={2} flexShrink={0}>
+        <Text color={selected ? 'accent' : 'subtle'}>{selected ? '▌' : commented ? '●' : ' '}</Text>
+      </Box>
+      <Box flexDirection="column" flexGrow={1} flexShrink={0}>{children}</Box>
+    </Box>
+  )
+}
+
+function MarkdownImpl({ children, dimColor = false, cacheTokens = true, inlineMathImages = true, preserveSource = false, sourceNavigation }: MarkdownProps): React.ReactNode {
   const [highlight, setHighlight] = React.useState<CliHighlight | null>(null)
   // Inline math is baked into the ANSI text, so the switch must invalidate
   // the memo below (MathBlock nodes subscribe on their own).
@@ -284,18 +316,31 @@ function MarkdownImpl({ children, dimColor = false, cacheTokens = true, inlineMa
   configureMarked()
 
   const renderedNodes = React.useMemo(() => {
-    const source = stripPromptXMLTags(children)
+    const source = preserveSource ? children : stripPromptXMLTags(children)
+    const tokens = lexWithCache(source, cacheTokens)
+    const images = inlineMathImages && mathRendering === 'image' && !dimColor
+    if (sourceNavigation) {
+      const navigationTokens = markdownNavigationTokens(tokens)
+      const ranges = markdownTokenRanges(source, navigationTokens)
+      return navigationTokens.flatMap((token, index) => {
+        const range = ranges[index]
+        if (!range) return []
+        return [<MarkdownSourceBlock key={index} range={range} navigation={sourceNavigation}>
+          {renderTokensToNodes([token], highlight, dimColor, images)}
+        </MarkdownSourceBlock>]
+      })
+    }
     return renderTokensToNodes(
-      lexWithCache(source, cacheTokens),
+      tokens,
       highlight,
       dimColor,
       // Dimmed text (thinking) cannot dim an image, so it keeps Unicode.
-      inlineMathImages && mathRendering === 'image' && !dimColor,
+      images,
     )
-  }, [children, dimColor, highlight, cacheTokens, mathRendering, inlineMathImages, palette])
+  }, [children, dimColor, highlight, cacheTokens, mathRendering, inlineMathImages, palette, preserveSource, sourceNavigation])
 
   return (
-    <Box flexDirection="column" gap={1}>
+    <Box flexDirection="column" gap={1} flexShrink={sourceNavigation ? 0 : 1}>
       {renderedNodes}
     </Box>
   )
@@ -311,5 +356,7 @@ export const Markdown = React.memo(
     prev.children === next.children &&
     prev.dimColor === next.dimColor &&
     prev.cacheTokens === next.cacheTokens &&
+    prev.preserveSource === next.preserveSource &&
+    prev.sourceNavigation === next.sourceNavigation &&
     prev.inlineMathImages === next.inlineMathImages,
 )

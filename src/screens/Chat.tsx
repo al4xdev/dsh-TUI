@@ -3552,7 +3552,9 @@ export function Chat({
         const plan = channel.capabilities().plan
         const mounted = plan.route !== 'none'
         const parts = rawInput.trim().split(/\s+/).filter(Boolean)
-        if (mounted && parts.length === 0) {
+        // Registry presence alone cannot distinguish native plan-mode from an
+        // addon browser. Only an explicit deployment opt-in bypasses the picker.
+        if (mounted && parts.length === 0 && !channel.externalPlanCommand) {
           setHelpOpen(false)
           dispatchOverlay({
             type: 'open',

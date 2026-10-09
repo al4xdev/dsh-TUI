@@ -22,6 +22,7 @@ import { agentMessageStateColor, agentMessageStateText } from './TranscriptLeave
 import type { AgentMessageState } from './agentTeam.js'
 import { liveOutputMaxLines, liveOutputView } from './liveOutputLines.js'
 import { isPatchDiff, parseFilePatch, patchHeader, type ToolPatchDiff } from '../diffPatch.js'
+import { Markdown } from '../Markdown.js'
 
 type Props = {
   tool: ToolRow
@@ -918,6 +919,13 @@ export function AssistantToolUseMessage({
   const shownLines: BodyLine[] = liveLines.length === 0 || revealedLines.length < rendered.length
     ? revealedLines
     : [...lines, ...liveLines, ...rendered.slice(lines.length)]
+  // Local plan presenters keep machine JSON untouched. Only their settled,
+  // expanded human view opts into Markdown; retain native caps/errors otherwise.
+  const planMarkdown = !isError && !isRunning && !sourceFolded && (verbose || isExpanded)
+    && tool.resultView?.card === 'generic'
+    && ['plan_read', 'plan_stage', 'plan_reopen', 'plan_close', 'plan_list', 'exit_plan_mode'].includes(tool.name)
+    && body.length <= VERBOSE_BODY_WINDOW
+    ? body.map(line => line.text).join('\n') : undefined
   // Nested split-diff context panes must also yield to interaction highlights.
   // `none` leaves them transparent so the selected/expanded root shows through.
   const ordinaryToolBackground = isSelected || isExpanded ? 'none' : toolBackground
@@ -987,6 +995,12 @@ export function AssistantToolUseMessage({
               toolBackground={ordinaryToolBackground}
               reveal={revealable ? { key: `${revealKey}:split` } : undefined}
             />
+          </Box>
+        ) : planMarkdown !== undefined ? (
+          <Box flexDirection="column" paddingLeft={3} flexShrink={0}>
+            <Markdown preserveSource>{planMarkdown}</Markdown>
+            {disclosure.map((line, index) => <Text key={index} dimColor>{line.text}</Text>)}
+            {footnote !== undefined && <Text color="subtle">{footnote}</Text>}
           </Box>
         ) : (
           shownLines.map((line, index) => (

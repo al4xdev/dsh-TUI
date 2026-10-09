@@ -121,6 +121,8 @@ export interface ChannelUi {
   readonly configuredActivityFrames: string | undefined
   /** Explicit cordis.yml `lang` (undefined = settings/lang.json wins). */
   readonly configuredLang: string | undefined
+  /** Deployment opt-in: bare /plan invokes the external registry command. */
+  readonly externalPlanCommand: boolean
   /** Running token totals across the session's assistant messages. */
   readonly tokens: TokenUsage
   /** 本会话主会话用量按模型分桶（费用估算输入）。与 `tokens` 并行累计，

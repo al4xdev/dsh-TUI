@@ -30,3 +30,5 @@ export { useTerminalImages, useTerminalImageCellSize, useTerminalImageProtocol }
 export { useBlink } from './hooks/useBlink.js'
 export { Ansi } from './ink/Ansi.js'
 export type { Key } from './ink/events/input-event.js'
+export { Markdown, type MarkdownProps } from './components/Markdown.js'
+export { markdownSourceRange, markdownSourceBlocks, type MarkdownSourceRange, type MarkdownSourceBlock } from './markdown-source.js'

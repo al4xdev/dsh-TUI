@@ -34,6 +34,8 @@ export const inject = ['agents']
  * directory, and display preferences.
  */
 export interface Config {
+  /** Route bare /plan to the registered addon command instead of the native picker. */
+  externalPlanCommand?: boolean
   /** Existing session to attach; a fresh session is created when absent. */
   sessionId?: string
   /** Agent backend the session runs on: `dsh` (default), the DeepSeek
@@ -303,6 +305,7 @@ export const Config: Schema<Config, RuntimeConfig<Config>> = editableConfig<Conf
   activityFrames: Schema.string().required(false),
   contextBar: Schema.boolean().default(true),
   fullscreen: Schema.boolean().default(true),
+  externalPlanCommand: Schema.boolean().default(false),
   terminalImages: Schema.boolean().default(true),
   lang: Schema.string().required(false),
   preset: Schema.string().required(false),

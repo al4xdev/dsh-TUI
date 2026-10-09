@@ -88,6 +88,7 @@ export interface ChannelLaunchOptions {
   configuredProvider?: string
   configuredModel?: string
   configuredLang?: string
+  externalPlanCommand?: boolean
   configuredActivityFrames?: string
   agentPreset?: string
   modes?: readonly SessionModeSpec[]
@@ -153,7 +154,7 @@ export function createInitialChannelView(
   'responseChars' | 'activeToolCount' | 'turnStart' | 'lastUserText' |
   'notifications' | 'contextWindow' | 'reasoningEffort' | 'mode' | 'modeIndex' |
   'activityFrames' | 'configuredProvider' | 'configuredModel' |
-  'configuredPreset' | 'configuredActivityFrames' | 'configuredLang' | 'diffLayout' |
+  'configuredPreset' | 'configuredActivityFrames' | 'configuredLang' | 'externalPlanCommand' | 'diffLayout' |
   'thinkingFold' | 'jobGroupFold' | 'toolBackground' | 'scrollGutter' | 'pageMargin' |
   'foldTerminalCommand' | 'turnUsageRow' | 'promptSessionLabel' | 'expandEditor' | 'smoothStreaming' |
   'statusBar' | 'whale' | 'whaleIdle' | 'splashFont' | 'brand' | 'minimalUi' | 'activityEnabled' | 'contextBarEnabled' |
@@ -173,6 +174,7 @@ export function createInitialChannelView(
     activityFrames: normalizeActivityPreset(options.activityFrames), configuredProvider: options.configuredProvider,
     configuredModel: options.configuredModel, configuredPreset: options.configuredPreset,
     configuredActivityFrames: options.configuredActivityFrames, configuredLang: options.configuredLang,
+    externalPlanCommand: options.externalPlanCommand === true,
     diffLayout: options.diffLayout ?? 'auto', thinkingFold: options.thinkingFold ?? 'preview',
     jobGroupFold: normalizeJobGroupFold(options.jobGroupFold),
     toolBackground: normalizeToolBackground(options.toolBackground), scrollGutter: normalizeScrollGutter(options.scrollGutter),

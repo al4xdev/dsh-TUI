@@ -49,6 +49,10 @@
       "types": "./lib/types/index.d.ts",
       "import": "./lib/types/index.js"
     },
+    "./ui": {
+      "types": "./lib/types/ui.d.ts",
+      "import": "./lib/types/ui.js"
+    },
     "./working-activity": {
       "types": "./lib/types/working-activity.d.ts",
       "import": "./lib/types/working-activity.js"

@@ -17,6 +17,31 @@
 
 # dsh-TUI
 
+### Managed plan addon seam (local source extension)
+
+Plugin config `externalPlanCommand: true` routes bare `/plan` to the registered
+command instead of the native picker (default `false`; arguments unchanged).
+Disable native plan-mode before registering a replacement that opens its scene.
+The flag grants no execution authority and implements no persistence.
+
+Scenes receive `ui.Markdown`, `ui.markdownSourceRange` and `ui.markdownSourceBlocks`, also exported from
+`@deepseek-harness-tui/dsh-tui/ui`. Render with injected host React and
+`{ preserveSource: true, children: source }`; existing renderers/fallbacks apply.
+The helpers select exact 1-based source ranges with quoted context. Bind anchors
+to immutable revision/hash. Optional `sourceNavigation: { line, onSelect,
+commentLines, scrollRef }` adds a block cursor and mouse selection using the native
+renderer. List items are separate anchors; diagrams/tables/paragraphs retain their
+whole source block. Wrapped terminal rows are never treated as source lines.
+Use a vertical `ScrollBox` (`flexDirection: 'column'`) for scrollable artifacts;
+keep the Markdown root at the content origin when using its scroll anchor.
+Expanded managed-plan tool cards also render their human presentation as native
+Markdown; ordinary tools, error views, machine JSON and native size caps stay unchanged.
+The local managed-plan scene uses `c` to add/edit comments and `Esc` to save a
+comment draft. `d` asks for `y/n` confirmation before deleting a draft; its audit
+record remains. `O` reopens the current plan as a new staged revision of the same
+ID (already staged is a no-op). Historical revisions stay read-only, and reopened
+plans always require fresh owner approval before execution.
+
 > An interactive terminal UI plugin for DeepSeek Harness. It ships a
 > pixel-whale header, live work status, streaming thinking, double-Esc time
 > rewind, a context progress bar, and a TPS gauge. It mounts as a pure plugin,
