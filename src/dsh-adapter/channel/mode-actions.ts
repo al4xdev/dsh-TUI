@@ -11,7 +11,7 @@ import { agentCapabilityEvidence, resolveAgentCapabilities } from './capabilitie
 import type { DshChannelBinding } from './binding.js'
 
 type Binding = DshChannelBinding
-type ModeState = Pick<ChannelState, 'mode' | 'modeIndex' | 'emit'>
+type ModeState = Pick<ChannelState, 'mode' | 'modeIndex' | 'emit'> & Partial<Pick<ChannelState, 'externalPlanCommand'>>
 
 /**
  * Fail-soft reporting for a session-mode write. The mutation path reaches
@@ -60,7 +60,7 @@ export function createModeActions(
    *  instead of this module keeping its own registry lookup (the same fact
    *  `/plan` dispatch and the command-list annotation use). */
   const planRoute = (agent: Agent): CommandRoute =>
-    resolveAgentCapabilities(agentCapabilityEvidence(ctx, agent)).plan.route
+    state.externalPlanCommand ? 'none' : resolveAgentCapabilities(agentCapabilityEvidence(ctx, agent)).plan.route
   type ModeCapture = ReturnType<Binding['capture']>
   const current = (capture: ModeCapture): boolean => owner.current() && binding.isCurrent(capture)
   const capturedSession = (capture: ModeCapture) => capture.agent.session
@@ -70,6 +70,7 @@ export function createModeActions(
 // union, so they are matched by name through casts — the same pattern as
 // `agent-preset/selected` in renderEvent and the goal projection above.
 const foldPlanActive = (events: readonly SessionEvent[]): boolean => {
+  if (state.externalPlanCommand) return false
   let active = false
   for (const event of events) {
     if ((event as { type: string }).type === 'plan/mode') {
@@ -207,6 +208,8 @@ const prePlanModeSpec = (log: readonly SessionEvent[]): SessionModeSpec | undefi
 
   const applyModeUnsafe = async (spec: SessionModeSpec, capture: ModeCapture): Promise<void> => {
     if (!current(capture)) return
+    // Reject native Plan targets before their permission atoms can land.
+    if (state.externalPlanCommand && spec.plan === true) return
     // This action writes durable session policy. The runtime snapshot comes
     // from composition and is immutable for this Channel lifetime, so an
     // observed plan exit cannot bypass the renderer/Port shadow guard.
@@ -214,7 +217,7 @@ const prePlanModeSpec = (log: readonly SessionEvent[]): SessionModeSpec | undefi
     const agent = capture.agent
     const session = capturedSession(capture)
     pendingPlanExitRestores.delete(session)
-  const planMode = ctx.get('planMode') as
+  const planMode = (state.externalPlanCommand ? undefined : ctx.get('planMode')) as
     | { get?(a: Agent): { active: boolean; pending?: boolean } }
     | undefined
   const planActive = foldPlanActive(snapshotLiveSessionEvents(session))
@@ -227,7 +230,7 @@ const prePlanModeSpec = (log: readonly SessionEvent[]): SessionModeSpec | undefi
   if (planActive && planMode?.get?.(agent).pending === undefined) {
     explicitPlanExits.delete(session)
   }
-  if (spec.plan !== undefined && (planMode?.get?.(agent).pending ?? planActive) !== spec.plan) {
+  if (!state.externalPlanCommand && spec.plan !== undefined && (planMode?.get?.(agent).pending ?? planActive) !== spec.plan) {
     if (planRoute(agent) === 'none') {
       notify(t('mode-plan-unavailable'), { color: 'warning' })
       return
@@ -288,6 +291,7 @@ const prePlanModeSpec = (log: readonly SessionEvent[]): SessionModeSpec | undefi
     const capture = binding.capture()
     if (!current(capture) || session !== capturedSession(capture)) return
     const eventType = (event as { type: string }).type
+    if (state.externalPlanCommand && eventType === 'plan/mode') return
     if (eventType === 'plan/mode' || eventType === 'sandbox/mode' || eventType === 'approval/policy') {
       refreshMode()
     }

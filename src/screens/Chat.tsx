@@ -745,6 +745,13 @@ export function Chat({
    * list while the fresh one loads, exactly as the boolean era did.
    */
   const [overlay, dispatchOverlay] = React.useReducer(chatOverlayReducer, NO_OVERLAY)
+  React.useEffect(() => {
+    // Retire a native picker left over from a binding/config change; hiding it
+    // alone would leave the composer blocked by an invisible modal.
+    if (channel.externalPlanCommand && overlay.kind === 'plan') {
+      dispatchOverlay({ type: 'close' })
+    }
+  }, [channel.externalPlanCommand, overlay.kind])
   // `/migrate` picker rows (null = collecting in the background; the picker
   // shows its empty state until the sub-second scan lands).
   const [migrateRows, setMigrateRows] = React.useState<MigratePickerRow[] | null>(null)
@@ -4180,6 +4187,11 @@ export function Chat({
         const argument = parts.length === 1 && parts[0] === 'on' ? '' : rawInput
         // Registry presence alone cannot distinguish native plan-mode from an
         // addon browser. Only an explicit deployment opt-in bypasses the picker.
+        if (channel.externalPlanCommand && (parts[0] === 'on' || parts[0] === 'off')) {
+          setHelpOpen(false)
+          channel.notify(t('plan-artifact-native-controls-disabled'), { color: 'warning' })
+          return true
+        }
         if (mounted && parts.length === 0 && !channel.externalPlanCommand) {
           setHelpOpen(false)
           dispatchOverlay({
@@ -5591,6 +5603,10 @@ export function Chat({
       return
     }
     if (overlay.kind === 'plan') {
+      if (channel.externalPlanCommand) {
+        dispatchOverlay({ type: 'close' })
+        return
+      }
       if (key.upArrow || key.downArrow) {
         dispatchOverlay({ type: 'move', delta: key.upArrow ? -1 : 1, count: 2 })
       } else if (plainReturn) {
@@ -6396,13 +6412,14 @@ export function Chat({
               />
             </Box>
           )}
-          {overlay.kind === 'plan' && (
+          {overlay.kind === 'plan' && !channel.externalPlanCommand && (
             <Box flexDirection="column" marginTop={1}>
               <PlanPicker
                 focusIndex={overlay.index}
                 currentOn={channel.mode.plan === true}
                 onPick={(index) => {
                   dispatchOverlay({ type: 'close' })
+                  if (channel.externalPlanCommand) return
                   const on = index === 0
                   void runExternalCommand('plan', on ? '' : ' off')
                 }}

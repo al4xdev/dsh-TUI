@@ -295,7 +295,7 @@ for (const [presetId, services, expected] of [
   ok(
     // The third argument is the other half of the wiring: the refresh path must
     // annotate through the same capability facts, not a constant.
-    /annotateCommandCapabilities\(\s*withTeamCommandVisibility\(commands, teamServiceActive\(ctx\)\),\s*capabilitiesOf\(\),/.test(source) &&
+    /annotateCommandCapabilities\(\s*withTeamCommandVisibility\(commands, teamServiceActive\(ctx\)\),\s*capabilitiesOf\(\),\s*state\.externalPlanCommand,/.test(source) &&
     source.includes('publishCommandList(commands)'),
     'the command-list refresh path annotates through the shared capability facts',
   )

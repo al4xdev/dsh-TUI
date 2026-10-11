@@ -239,6 +239,7 @@ export function attachDshExtensions(
   // after the configured/default modes, rebuilt from the live service snapshot.
   const permissionRoster = createPermissionModeRoster(ctx, {
     configuredModes: configuredSessionModes,
+    externalPlanCommand: state.externalPlanCommand,
     agent: () => binding.agent,
     warn: message => ctx.logger.warn(message),
   })
@@ -269,6 +270,7 @@ export function attachDshExtensions(
     state.commandList = annotateCommandCapabilities(
       withTeamCommandVisibility(commands, teamServiceActive(ctx)),
       capabilitiesOf(),
+      state.externalPlanCommand,
     )
     if (emit) state.emit()
   }
