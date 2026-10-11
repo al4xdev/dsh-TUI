@@ -12,7 +12,7 @@ import type { PermissionModeRoster } from './mode-roster.js'
 import type { ChannelState } from './types.js'
 
 type Binding = DshChannelBinding
-type ModeState = Pick<ChannelState, 'mode' | 'modeIndex' | 'emit'>
+type ModeState = Pick<ChannelState, 'mode' | 'modeIndex' | 'emit'> & Partial<Pick<ChannelState, 'externalPlanCommand'>>
 type ModeCapture = ReturnType<Binding['capture']>
 /** The composition seam `createModeActions` owns; this factory forwards every
  *  member verbatim so both stay in lockstep. */
@@ -63,20 +63,22 @@ const foldApprovalPolicy = (events: readonly SessionEvent[]): string | undefined
 function derivePermissionModeIndex(
   modes: readonly SessionModeSpec[],
   events: readonly SessionEvent[],
+  externalPlanCommand = false,
 ): number {
+  const planActive = !externalPlanCommand && foldPlanActive(events)
   const identity = foldPermissionPreset(events)
   if (identity !== undefined) {
     const permissionIndex = modes.findIndex(
       spec =>
         spec.permission === identity
-        && (spec.plan === undefined || foldPlanActive(events) === spec.plan),
+        && (spec.plan === undefined || planActive === spec.plan),
     )
     if (permissionIndex >= 0) return permissionIndex
   }
   const index = modes.findIndex(
     spec =>
       spec.permission === undefined
-      && (spec.plan === undefined || foldPlanActive(events) === spec.plan)
+      && (spec.plan === undefined || planActive === spec.plan)
       && (spec.sandbox === undefined || foldSandboxMode(events) === spec.sandbox)
       && (spec.approval === undefined || foldApprovalPolicy(events) === spec.approval),
   )
@@ -137,7 +139,7 @@ export function createPermissionModeActions(
    *  every refresh: a registry mount/unmount and a re-bind both land here. */
   const refreshMode = (): void => {
     roster.rebuild(binding.agent)
-    const index = derivePermissionModeIndex(sessionModes, snapshotLiveSessionEvents(binding.agent.session))
+    const index = derivePermissionModeIndex(sessionModes, snapshotLiveSessionEvents(binding.agent.session), state.externalPlanCommand)
     state.modeIndex = index
     state.mode = sessionModes[index]!
   }
@@ -159,15 +161,16 @@ export function createPermissionModeActions(
 
   const applyModeUnsafe = async (spec: SessionModeSpec, capture: ModeCapture): Promise<void> => {
     if (!owner.current() || !binding.isCurrent(capture)) return
+    if (state.externalPlanCommand && spec.plan === true) return
     // This action writes durable session policy; the permission switch writes
     // the same kind of durable identity, so it is under the same guard.
     assertShadowPolicy('mutate', deps.runtime.mode)
     const agent = capture.agent
     const session = agent.session
-    const planMode = ctx.get('planMode') as
+    const planMode = (state.externalPlanCommand ? undefined : ctx.get('planMode')) as
       | { get?(a: Agent): { active: boolean; pending?: boolean } }
       | undefined
-    const planActive = foldPlanActive(snapshotLiveSessionEvents(session))
+    const planActive = !state.externalPlanCommand && foldPlanActive(snapshotLiveSessionEvents(session))
     const planChange = spec.plan !== undefined && (planMode?.get?.(agent).pending ?? planActive) !== spec.plan
     if (planActive && planMode?.get?.(agent).pending === undefined) {
       explicitPlanExits.delete(session)
@@ -203,7 +206,7 @@ export function createPermissionModeActions(
     try {
       const capture = binding.capture()
       if (!owner.current() || !binding.isCurrent(capture)) return
-      const index = derivePermissionModeIndex(sessionModes, snapshotLiveSessionEvents(capture.agent.session))
+      const index = derivePermissionModeIndex(sessionModes, snapshotLiveSessionEvents(capture.agent.session), state.externalPlanCommand)
       await applyMode(sessionModes[(index + 1) % sessionModes.length]!, capture)
     } catch (error) {
       reportModeSwitchFailure(ctx, notify, refreshMode, error)
@@ -215,6 +218,7 @@ export function createPermissionModeActions(
     const sessionEvent = event as SessionEvent
     base.onSessionEvent(subject, sessionEvent)
     const type = (sessionEvent as { type: string }).type
+    if (state.externalPlanCommand && type === 'plan/mode') return
     if (type === 'permission/preset') refreshMode()
     if (type !== 'plan/mode' || (sessionEvent.data as unknown as { active?: boolean }).active !== false) return
     const remembered = permission.prePlanPermissionIdentity(subject)

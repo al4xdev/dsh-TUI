@@ -206,6 +206,7 @@ export function attachDshExtensions(
   // after the configured/default modes, rebuilt from the live service snapshot.
   const permissionRoster = createPermissionModeRoster(ctx, {
     configuredModes: configuredSessionModes,
+    externalPlanCommand: state.externalPlanCommand,
     agent: () => binding.agent,
     warn: message => ctx.logger.warn(message),
   })
@@ -230,7 +231,7 @@ export function attachDshExtensions(
   // Annotated from the start: Help and `/` completion read `commandList`
   // before the first skill-catalog refresh publishes a new one, and a command
   // whose capability is missing must never look usable in that window.
-  state.commandList = annotateCommandCapabilities(LOCAL_COMMANDS, capabilitiesOf())
+  state.commandList = annotateCommandCapabilities(LOCAL_COMMANDS, capabilitiesOf(), state.externalPlanCommand)
   Object.defineProperty(state, 'autoRecapOnOpen', {
     configurable: true,
     enumerable: true,
@@ -385,7 +386,7 @@ export function attachDshExtensions(
       // Annotate before publishing: Help and `/` completion both read
       // `commandList`, so a command whose capability is missing says so
       // instead of looking usable and failing on use.
-      state.commandList = annotateCommandCapabilities(commands, capabilitiesOf())
+      state.commandList = annotateCommandCapabilities(commands, capabilitiesOf(), state.externalPlanCommand)
       state.emit()
     },
     commandDescriptions: name => commandTrees?.descriptions(name),

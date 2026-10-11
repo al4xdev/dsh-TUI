@@ -3,6 +3,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { isCommandCompletionToken } from '../../commands.js'
 import {
   canonicalPresetFor,
+  externalPlanSessionModes,
   permissionCycleEntry,
   permissionModeSpec,
   stablePermissionRosterOrder,
@@ -105,17 +106,19 @@ export function createPermissionModeRoster(
   ctx: Context,
   deps: {
     configuredModes: readonly SessionModeSpec[]
+    externalPlanCommand?: boolean
     agent: () => Agent
     warn?: (message: string) => void
   },
 ): PermissionModeRoster {
   const warn = deps.warn ?? ((message: string) => ctx.logger.warn(message))
-  const configuredIds = configuredPermissionIds(deps.configuredModes)
+  const configuredModes = deps.externalPlanCommand ? externalPlanSessionModes(deps.configuredModes) : deps.configuredModes
+  const configuredIds = configuredPermissionIds(configuredModes)
   const warned = new Set<string>()
   const order = new WeakMap<object, readonly string[]>()
   // Mutated in place: a consumer that captured this array keeps observing the
   // live roster across rebuilds (see the interface contract).
-  const modes: SessionModeSpec[] = [...deps.configuredModes]
+  const modes: SessionModeSpec[] = [...configuredModes]
 
   const bundlesOf = (): readonly PermissionPresetBundle[] => {
     let service: unknown
@@ -134,7 +137,7 @@ export function createPermissionModeRoster(
 
   const rebuild = (target: Agent): void => {
     const snapshot = readRuntimePermissionSnapshot(ctx, target)
-    const excluded = staticCanonicalTargets(deps.configuredModes, bundlesOf())
+    const excluded = staticCanonicalTargets(configuredModes, bundlesOf())
     const candidates = new Map<string, PermissionPresetOption>()
     if (snapshot !== undefined) {
       for (const option of snapshot.options) {
@@ -165,7 +168,7 @@ export function createPermissionModeRoster(
       if (option !== undefined) dynamic.push(permissionModeSpec(option))
     }
     modes.length = 0
-    for (const spec of [...deps.configuredModes, ...dynamic]) modes.push(spec)
+    for (const spec of [...configuredModes, ...dynamic]) modes.push(spec)
   }
 
   // Main rebuilds once at construction, before the roster is first read.

@@ -155,6 +155,7 @@
     "verify:packaged-presets": "node scripts/verify-packaged-presets.mjs",
     "verify:minimal-preset-tools": "node scripts/verify-minimal-preset-tools.mjs",
     "verify:agent-capabilities": "node --import tsx/esm scripts/verify-agent-capabilities.ts",
+    "verify:external-plan": "node scripts/verify-external-plan-chat-source.mjs && node --import tsx/esm scripts/verify-managed-plan-completions.ts && node --import tsx/esm scripts/verify-external-plan-modes.ts",
     "verify:minimal-ui-naming": "node --import tsx/esm scripts/verify-minimal-ui-naming.ts",
     "verify:liangshen-bootstrap": "node scripts/verify-liangshen-bootstrap.mjs",
     "verify:liangshen-instruction-hint": "node scripts/verify-liangshen-instruction-hint.mjs",

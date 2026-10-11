@@ -20,9 +20,26 @@
 ### Managed plan addon seam (local source extension)
 
 Plugin config `externalPlanCommand: true` routes bare `/plan` to the registered
-command instead of the native picker (default `false`; arguments unchanged).
+command instead of the native picker (default `false`). In this opt-in, legacy
+`/plan on` and `/plan off` are blocked with artifact/autoApprove usage guidance;
+other arguments pass through unchanged. A stale native picker is closed and its
+keyboard/click callbacks cannot dispatch native controls. Help and completion
+describe project artifacts rather than advertising native mode switches.
+It treats `/plan` as a project-artifact command: native Plan is removed from the
+Shift+Tab cycle, and historical `plan/mode` events are ignored only for mode
+presentation/interpretation, without rewriting history. Real sandbox and approval
+policies remain effective; project `autoApprove` does not auto-approve permissions.
+With `false`, native Plan behavior is unchanged.
 Disable native plan-mode before registering a replacement that opens its scene.
 The flag grants no execution authority and implements no persistence.
+Native components remain available upstream; this is a reversible routing/UI
+override, not a mock-success handler or a deletion of native support. Run
+`pnpm run verify:external-plan` after upstream merges; this source-only regression
+gate is also included in `verify:build`. Source checks do not replace the normal
+build/render tests or updating the installed frontend.
+For a pre-build review, invoke the three gate scripts directly with `node`
+(see the `verify:external-plan` script in `package.json`): the package manager
+may install/prepare dependencies before `pnpm run`, triggering a local compile.
 
 Scenes receive `ui.Markdown`, `ui.markdownSourceRange` and `ui.markdownSourceBlocks`, also exported from
 `@deepseek-harness-tui/dsh-tui/ui`. Render with injected host React and

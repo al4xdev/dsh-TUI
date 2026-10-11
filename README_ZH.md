@@ -21,8 +21,20 @@
 ### 托管计划插件接缝（本地源码扩展）
 
 插件配置 `externalPlanCommand: true` 让裸 `/plan` 调用注册命令而非原生选择器。
-默认 `false`，带参数形式不变。注册打开场景的替代命令前禁用原生 plan-mode。
+默认 `false`。启用后，旧 `/plan on` 和 `/plan off` 会被阻止，并提示产物浏览与
+autoApprove 的正确用法；其他参数原样转发。残留的原生选择器会关闭，键盘与点击
+回调不会派发原生控制。帮助与补全描述项目产物，不再宣传原生模式切换。
+启用后，`/plan` 是项目计划产物命令：原生 Plan
+不再出现在 Shift+Tab 循环中，历史 `plan/mode` 事件仅在模式呈现与解释时被忽略，
+不会改写历史。真实 sandbox 与审批策略仍然有效；项目 `autoApprove` 不会自动批准权限。
+设为 `false` 时，原生 Plan 行为不变。注册打开场景的替代命令前禁用原生 plan-mode。
 此开关不授予执行权限，也不实现持久化。
+上游原生组件仍然保留：这是可逆的路由/UI 覆盖，不是伪造成功的 mock，也不是删除
+原生支持。合并上游后运行 `pnpm run verify:external-plan`；此源码回归也已加入
+`verify:build`。源码检查不能替代常规构建/渲染验证或更新已安装的 frontend。
+构建前审查请直接用 `node` 执行三个门禁脚本（见 `package.json` 的
+`verify:external-plan`）：包管理器可能在 `pnpm run` 前安装/prepare 依赖，
+从而触发本地编译。
 
 场景收到 `ui.Markdown`、`ui.markdownSourceRange` 与 `ui.markdownSourceBlocks`，也可从
 `@deepseek-harness-tui/dsh-tui/ui` 导入。使用注入的宿主 React，传入

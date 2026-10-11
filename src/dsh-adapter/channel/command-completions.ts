@@ -122,9 +122,20 @@ export function createCommandCompletions(deps: {
         { name: 'zoom', description: 'Zoom the active panel', descriptionKey: 'sugg-panel-zoom-desc' },
         ...parseSidePanelIds(getSidePanelPanels()).map(id => ({ name: id, description: `Open the ${id} panel`, descriptionKey: 'sugg-panel-id-desc' as const })),
       ]
-      if (path.length === 1 && path[0] === 'plan') return [
-        { name: 'on', description: 'Enter plan mode: read-only, plan before acting', descriptionKey: 'plan-mode-on-desc' },
-        { name: 'off', description: 'Exit plan mode, back to normal execution', descriptionKey: 'plan-mode-off-desc' },
+      if (path.length === 1 && path[0] === 'plan') {
+        if (state.externalPlanCommand) return [
+          { name: 'new', description: 'Create project plan artifacts for a request', descriptionKey: 'plan-artifact-new-desc' },
+          { name: 'auto', description: 'Configure project autoApprove', descriptionKey: 'plan-artifact-auto-desc' },
+        ]
+        return [
+          { name: 'on', description: 'Enter plan mode: read-only, plan before acting', descriptionKey: 'plan-mode-on-desc' },
+          { name: 'off', description: 'Exit plan mode, back to normal execution', descriptionKey: 'plan-mode-off-desc' },
+        ]
+      }
+      if (path.length === 2 && path[0] === 'plan' && path[1] === 'auto' && state.externalPlanCommand) return [
+        { name: 'on', description: 'Enable project autoApprove', descriptionKey: 'plan-artifact-auto-on-desc' },
+        { name: 'off', description: 'Disable project autoApprove; require owner approval', descriptionKey: 'plan-artifact-auto-off-desc' },
+        { name: 'status', description: 'Show the project autoApprove setting', descriptionKey: 'plan-artifact-auto-status-desc' },
       ]
       return commandTrees?.children(path) ?? []
     })

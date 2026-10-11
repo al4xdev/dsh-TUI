@@ -19,6 +19,16 @@ export const DEFAULT_SESSION_MODES: readonly SessionModeSpec[] = [
   { id: 'full', plan: false, sandbox: 'danger-full-access', approval: 'never' },
 ]
 
+/** An external `/plan` owns project artifacts, never native mode atoms. */
+export function externalPlanSessionModes(modes: readonly SessionModeSpec[]): readonly SessionModeSpec[] {
+  const withoutPlan = (entries: readonly SessionModeSpec[]) => entries
+    .filter(spec => spec.plan !== true)
+    .map(({ plan: _plan, ...spec }) => spec)
+    .filter(spec => spec.permission !== undefined || spec.sandbox !== undefined || spec.approval !== undefined)
+  const filtered = withoutPlan(modes)
+  return filtered.length > 0 ? filtered : withoutPlan(DEFAULT_SESSION_MODES)
+}
+
 /** Preset names the TUI treats as the canonical built-ins. They are covered
  *  by the static modes of the default cycle, so they never enter the cycle as
  *  dynamic entries; `/permission` targets them whenever the deployment's
