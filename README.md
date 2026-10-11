@@ -451,6 +451,8 @@ Text, cursor position and staged image attachments on the launchpad or in chat w
 
 The goal bar stays on one summary line: hovering truncated goal text in fullscreen or split shows the whole objective, and a bare `/goal` prints the full status — objective, phase, rounds or budget, available commands — as a transcript block in the `/plugins` shape. Inline mode sees no pointer events, so that block is how its users read a long objective.
 
+With the Grammar Fix addon mounted, `Ctrl+G` corrects the draft without sending it. `Esc` or `Ctrl+C` cancels the correction; `Ctrl+Z` restores the previous draft. Without the addon, `Ctrl+G` keeps its default external-editor action (`$VISUAL` / `$EDITOR`). While the addon owns `Ctrl+G`, choose another external-editor shortcut in `/settings`.
+
 While the model is working: `Enter` steers, `Tab` queues a follow-up, `Ctrl+Enter` interrupts and sends. Input that names a command is still a command — with or without arguments — so `/model` or `/new` reach their own gate (and the `/` overlay sinks the commands that affect the running conversation) instead of silently becoming an interruption; only text that is not a command — and a direct skill gesture such as `/skill-name …` — steers.
 
 When DSH ends a turn because its session was disposed, the transcript shows “Session stopped”; user interruption keeps its existing prompt for what to do next. This describes the reported stop reason and does not recover a stuck session or its queued inputs.
