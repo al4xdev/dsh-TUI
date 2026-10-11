@@ -45,6 +45,8 @@ import { actionMatches } from '../utils/keymap.js'
 import { CommandSuggestions } from './CommandSuggestions.js'
 import { FileSuggestions } from './FileSuggestions.js'
 import { HelpMenu } from './HelpMenu.js'
+import { GrammarFixActivity } from './GrammarFixActivity.js'
+import { createGrammarFixPresentation, grammarFixSuccess, type GrammarFixBridge, type GrammarFixPresentation } from './grammarFixPresentation.js'
 import { OverlayAbove, useOverlayListRows } from './OverlayAbove.js'
 import { listWindow } from './listWindow.js'
 import { SuggestionCard, cardContentWidth } from './SuggestionCard.js'
@@ -1227,6 +1229,23 @@ export function PromptInput({
   /** True while the external editor owns the terminal (editor-key round-trip). */
   const editorBusyRef = React.useRef(false)
   const grammarAbortRef = React.useRef<AbortController | null>(null)
+  const [grammarPresentation, setGrammarPresentation] = React.useState<GrammarFixPresentation | null>(null)
+  const grammarDraftRef = React.useRef<{ text: string; lease: DraftImageLease } | null>(null)
+  const cancelGrammarFix = (notify: boolean): void => {
+    if (!grammarAbortRef.current) return
+    grammarAbortRef.current.abort()
+    grammarAbortRef.current = null
+    grammarDraftRef.current = null
+    editorBusyRef.current = false
+    setGrammarPresentation(null)
+    if (notify) channel.notify(t('grammar-canceled'))
+  }
+  // A provider may ignore abort. Release the UI immediately and fence its late
+  // continuation by controller identity, including same-text session switches.
+  React.useEffect(() => {
+    const draft = grammarDraftRef.current
+    if (draft && (suspended || value !== draft.text || !draftImageLeaseIsCurrent(draft.lease))) cancelGrammarFix(false)
+  }, [value, draftImagesGenerationRef.current, suspended])
   React.useEffect(() => () => grammarAbortRef.current?.abort(), [])
   /** Enter dedupe window: cmd pipelines can deliver one Enter as `\r`+`\n`. */
   const lastEnterAtRef = React.useRef(0)
@@ -2321,9 +2340,10 @@ export function PromptInput({
     // outcome lands — drop any key squeezed into that gap so the prompt's
     // setValue can never overwrite fresh typing (and vice versa).
     if (editorBusyRef.current) {
-      if (grammarAbortRef.current && (key.escape || (key.ctrl && input === 'c'))) {
+      if (grammarAbortRef.current) {
         event?.stopImmediatePropagation()
-        grammarAbortRef.current.abort()
+        if (key.escape || (key.ctrl && input === 'c')) cancelGrammarFix(true)
+        else if (key.ctrl && input === 'g') channel.notify(t('grammar-busy'), { color: 'warning' })
       }
       return
     }
@@ -2624,41 +2644,61 @@ export function PromptInput({
       return
     }
 
-    // Ctrl+G (remappable via /settings): edit the current draft in
-    if (input === 'g' && key.ctrl && !key.shift && !key.meta && !key.super) {
+    // Ctrl+G fixes the draft in place; unlike the external editor it owns no TTY.
+    const grammarShortcut = input === 'g' && key.ctrl && !key.shift && !key.meta && !key.super
+    const grammar = grammarShortcut
+      ? (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as GrammarFixBridge | undefined
+      : undefined
+    if (grammarShortcut && (grammar || !actionMatches('editor', input, key))) {
       event?.stopImmediatePropagation()
-      const grammar = (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as
-        | { fix: (text: string, current: { provider: string; model: string }, signal?: AbortSignal) => Promise<string> }
-        | undefined
-      if (!grammar) {
-        channel.notify('Grammar fixer unavailable in this profile.', { color: 'warning' })
+      if (!value.trim() || value.trimStart().startsWith('/')) {
+        channel.notify(t(!value.trim() ? 'grammar-empty' : 'grammar-command'))
         return
       }
-      if (!value.trim() || value.startsWith('/')) return
+      if (!grammar) {
+        channel.notify(t('grammar-unavailable'), { color: 'warning' })
+        return
+      }
       syncImageGeneration()
       advanceDraftRevision()
       const lease = captureDraftImageLease()
       const abort = new AbortController()
       grammarAbortRef.current = abort
+      grammarDraftRef.current = { text: value, lease }
       editorBusyRef.current = true
+      const current = { provider: channel.provider, model: channel.model }
+      const isCurrent = () => grammarAbortRef.current === abort && !abort.signal.aborted
+        && draftImageLeaseIsCurrent(lease) && valueRef.current === value
       void (async () => {
         try {
-          const corrected = await grammar.fix(value, { provider: channel.provider, model: channel.model }, abort.signal)
-          if (!draftImageLeaseIsCurrent(lease) || abort.signal.aborted) return
-          const beforeBlock = foldBlockRef.current
-          updateFoldBlock(null)
-          setInput(corrected, corrected.length, 'step', beforeBlock)
-          setSelectedCommand(0)
-          setFileSelected(0)
-          channel.notify('Grammar corrected. Review before sending.')
+          setGrammarPresentation(createGrammarFixPresentation(grammar.describe(current)))
+          const corrected = await grammar.fix(value, current, abort.signal, (message, metadata) => {
+            if (!isCurrent()) return
+            setGrammarPresentation(previous => previous && { ...previous, ...metadata, phase: metadata?.phase ?? message })
+          })
+          if (!isCurrent()) return
+          if (!corrected.trim()) throw new Error(t('grammar-no-text'))
+          if (corrected !== value) {
+            const beforeBlock = foldBlockRef.current
+            updateFoldBlock(null)
+            setInput(corrected, corrected.length, 'step', beforeBlock)
+            setSelectedCommand(0)
+            setFileSelected(0)
+          }
+          channel.notify(grammarFixSuccess(corrected === value))
         } catch (error: unknown) {
-          if (draftImageLeaseIsCurrent(lease)) {
+          if (isCurrent()) {
             const err = error as { message?: string }
-            channel.notify(abort.signal.aborted ? 'Correction canceled; draft preserved.' : String(err?.message ?? error), { color: 'warning' })
+            channel.notify(t('grammar-failed', { error: String(err?.message ?? error) }), { color: 'error' })
           }
         } finally {
-          grammarAbortRef.current = null
-          editorBusyRef.current = false
+          // An old canceled request must not clear a newer request's busy state.
+          if (grammarAbortRef.current === abort) {
+            grammarAbortRef.current = null
+            grammarDraftRef.current = null
+            editorBusyRef.current = false
+            setGrammarPresentation(null)
+          }
         }
       })()
       return
@@ -4553,6 +4593,7 @@ export function PromptInput({
           ))}
         </Box>
       )}
+      {grammarPresentation && <GrammarFixActivity presentation={grammarPresentation} />}
       {lastNotification && toastVisible && (
         // position=absolute takes zero layout height so the transcript never
         // shifts when a notification appears/disappears; the layer floats one

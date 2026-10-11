@@ -74,6 +74,36 @@ export const LANGS = ['zh', 'en'] as const
 export type I18nText = string | { one: string; other: string }
 
 const dict = {
+  // Pi grammar-fix widget copy; English deliberately matches the reference.
+  'grammar-language-auto': { zh: '自动（保留原语言）', en: 'Auto (keep original language)' },
+  'grammar-session-model': { zh: '当前会话模型', en: 'Session model' },
+  'grammar-correcting': { zh: '正在修正语法…', en: 'Correcting grammar…' },
+  'grammar-cancel-hint': { zh: 'Esc / Ctrl+C 取消', en: 'Esc / Ctrl+C cancels' },
+  'grammar-unavailable': { zh: '此配置未启用语法修正。', en: 'Grammar fixer unavailable in this profile.' },
+  'grammar-empty': { zh: '编辑器为空 — 无需修正。', en: 'Editor is empty — nothing to fix.' },
+  'grammar-command': { zh: '这看起来是命令 — 跳过。', en: 'This looks like a command — skipping.' },
+  'grammar-busy': { zh: '语法修正已在进行中…', en: 'Grammar fix is already in progress…' },
+  'grammar-fixed': { zh: '语法已修正。请检查后发送！', en: 'Grammar fixed. Review and send!' },
+  'grammar-no-changes': { zh: '无需修改 — 文本已正确。', en: 'No changes — the text is already OK.' },
+  'grammar-failed': { zh: '❌ 修正失败：{{error}}', en: '❌ Fix failed: {{error}}' },
+  'grammar-canceled': { zh: '修正已取消；草稿保留。', en: 'Correction canceled; draft preserved.' },
+  'grammar-no-text': { zh: '模型未返回文本。', en: 'The model returned no text.' },
+  'grammar-draft-updated': { zh: '草稿已更新。', en: 'Draft updated.' },
+  'grammar-editor-unavailable': { zh: '外部编辑器不可用。', en: 'External editor unavailable.' },
+  'grammar-joke-0': { zh: '教 AI 使用牛津逗号…', en: 'Teaching Oxford commas to your AI...' },
+  'grammar-joke-1': { zh: '调试英语语法错误…', en: 'Debugging English syntax errors...' },
+  'grammar-joke-2': { zh: '把错别字打磨得闪闪发光…', en: 'Polishing your typos until they shine...' },
+  'grammar-joke-3': { zh: '把 irregardless 换成真正的英语…', en: "Replacing 'irregardless' with actual English..." },
+  'grammar-joke-4': { zh: '让你的消息像资深开发者写的…', en: 'Making your message sound like a Senior Dev...' },
+  'grammar-joke-5': { zh: '理清主谓一致关系…', en: 'Untangling subject-verb agreements...' },
+  'grammar-joke-6': { zh: '咨询古老的语法巫师…', en: 'Consulting the ancient grammar wizards...' },
+  'grammar-joke-7': { zh: '在同事看到之前修正错别字…', en: 'Fixing typos before your team sees them...' },
+  'grammar-joke-8': { zh: '补上遗漏的分号和逗号…', en: 'Adding missing semicolons and commas...' },
+  'grammar-joke-9': { zh: '把开发者俚语转成标准英语…', en: 'Translating dev-slang into proper English...' },
+  'grammar-joke-10': { zh: '追捕失控的撇号…', en: 'Hunting down rogue apostrophes...' },
+  'grammar-joke-11': { zh: '从 2026 年起把 u 变成 you…', en: "Turning 'u' into 'you' since 2026..." },
+  'grammar-joke-12': { zh: '并行消除双重否定…', en: 'Eliminating double negatives in parallel...' },
+  'grammar-joke-13': { zh: '重构 english.txt…', en: 'Refactoring english.txt...' },
   // ── channel.ts ───────────────────────────────────────────────────────
   // Working spinner labels. WorkingSpinner resolves these through the
   // `spinner-verb-*` dynamic family so the status stays localized after a

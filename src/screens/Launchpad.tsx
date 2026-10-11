@@ -4,6 +4,8 @@ import { SearchBox } from '../components/SearchBox.js'
 import { OverlayAbove } from '../components/OverlayAbove.js'
 import { CommandSuggestions } from '../components/CommandSuggestions.js'
 import { LogoV2 } from '../components/LogoV2.js'
+import { GrammarFixActivity } from '../components/GrammarFixActivity.js'
+import { createGrammarFixPresentation, grammarFixSuccess, type GrammarFixBridge, type GrammarFixPresentation } from '../components/grammarFixPresentation.js'
 import type { Brand } from '../branding.js'
 import { resolveLaunchpadLayout, type LaunchpadLayout } from '../components/launchpadLayout.js'
 import { type LaunchpadAction } from '../components/launchpadActions.js'
@@ -586,6 +588,8 @@ export function Launchpad({
   // 用**当时最新**的 query/caret（PromptInput 用 revision 守同一条；这里没有
   // 本地 state，用每次渲染刷新的 refs 守），不能吃按键那一刻的闭包旧值。
   const queryRef = React.useRef(query)
+  const queryRevisionRef = React.useRef(0)
+  if (queryRef.current !== query) queryRevisionRef.current++
   queryRef.current = query
   const caretRef = React.useRef(caret)
   caretRef.current = caret
@@ -593,6 +597,20 @@ export function Launchpad({
   const alexGrammarAbort = React.useRef<AbortController | null>(null)
   const alexEditorBusy = React.useRef(false)
   const alexGrammarUndo = React.useRef<string | null>(null)
+  const [grammarPresentation, setGrammarPresentation] = React.useState<GrammarFixPresentation | null>(null)
+  const grammarRevisionRef = React.useRef<number | null>(null)
+  const cancelGrammarFix = (notify: boolean): void => {
+    if (!alexGrammarAbort.current || grammarRevisionRef.current === null) return
+    alexGrammarAbort.current.abort()
+    alexGrammarAbort.current = null
+    grammarRevisionRef.current = null
+    alexEditorBusy.current = false
+    setGrammarPresentation(null)
+    if (notify) showPasteNotice(t('grammar-canceled'))
+  }
+  React.useEffect(() => {
+    if (grammarRevisionRef.current !== null && (inputPaused || grammarRevisionRef.current !== queryRevisionRef.current)) cancelGrammarFix(false)
+  }, [query, inputPaused])
   React.useEffect(() => () => alexGrammarAbort.current?.abort(), [])
   /** 粘贴提示：落地页没有 toast 基础设施，借 Tips 行显示 4 秒（失败不能静默）。 */
   const [pasteNotice, setPasteNotice] = React.useState<string | undefined>(undefined)
@@ -736,7 +754,8 @@ export function Launchpad({
     if (inputPaused) return
     if (alexEditorBusy.current) {
       event?.stopImmediatePropagation()
-      if (key.escape || (key.ctrl && input === 'c')) alexGrammarAbort.current?.abort()
+      if (key.escape || (key.ctrl && input === 'c')) cancelGrammarFix(true)
+      else if (grammarRevisionRef.current !== null && key.ctrl && input === 'g') showPasteNotice(t('grammar-busy'))
       return
     }
     if (key.ctrl && !key.shift && input === 'z' && alexGrammarUndo.current !== null) {
@@ -746,40 +765,55 @@ export function Launchpad({
       onQueryChange(previous, previous.length)
       return
     }
+    const grammar = (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as GrammarFixBridge | undefined
     const grammarPressed = input === 'g' && key.ctrl && !key.shift && !key.meta && !key.super
+      && (grammar !== undefined || !actionMatches('editor', input, key))
     if (grammarPressed || actionMatches('editor', input, key)) {
       event?.stopImmediatePropagation()
       if (!query.trim() || (grammarPressed && query.startsWith('/'))) return
-      const grammar = (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as
-        | { fix: (text: string, current: { provider?: string; model?: string }, signal?: AbortSignal, onProgress?: (msg: string) => void) => Promise<string> }
-        | undefined
       if (grammarPressed && !grammar) {
-        showPasteNotice('Grammar fixer unavailable.')
+        showPasteNotice(t('grammar-unavailable'))
         return
       }
       const original = query
+      const revision = queryRevisionRef.current
       const abort = new AbortController()
       alexGrammarAbort.current = abort
       alexEditorBusy.current = true
       void (async () => {
         try {
+          if (grammarPressed) {
+            grammarRevisionRef.current = revision
+            setGrammarPresentation(createGrammarFixPresentation(grammar!.describe({ provider, model })))
+          }
           const outcome = grammarPressed
-            ? { kind: 'edited' as const, text: await grammar!.fix(original, { provider, model }, abort.signal, showPasteNotice) }
+            ? { kind: 'edited' as const, text: await grammar!.fix(original, { provider, model }, abort.signal, (_message, metadata) => {
+              if (abort.signal.aborted || alexGrammarAbort.current !== abort) return
+              if (metadata) setGrammarPresentation(current => current ? {
+                ...current,
+                language: metadata.language ?? current.language,
+                model: metadata.model ?? current.model,
+              } : current)
+            }) }
             : await editInExternalEditor(original)
-          if (abort.signal.aborted || queryRef.current !== original) return
+          if (abort.signal.aborted || queryRevisionRef.current !== revision) return
           if (outcome.kind === 'edited') {
             alexGrammarUndo.current = original
             onQueryChange(outcome.text, outcome.text.length)
-            showPasteNotice(grammarPressed ? 'Grammar corrected. Review before sending.' : 'Draft updated.')
-          } else showPasteNotice('External editor unavailable.')
+            showPasteNotice(grammarPressed ? grammarFixSuccess(outcome.text === original) : t('grammar-draft-updated'))
+          } else showPasteNotice(t('grammar-editor-unavailable'))
         } catch (error: unknown) {
           if (!abort.signal.aborted) {
             const err = error as { message?: string }
             showPasteNotice(String(err?.message ?? error))
           }
         } finally {
-          alexGrammarAbort.current = null
-          alexEditorBusy.current = false
+          if (alexGrammarAbort.current === abort) {
+            alexGrammarAbort.current = null
+            grammarRevisionRef.current = null
+            alexEditorBusy.current = false
+            setGrammarPresentation(null)
+          }
         }
       })()
       return
@@ -992,6 +1026,7 @@ export function Launchpad({
         {/* 词标与输入框之间的呼吸留白（第六版）：默认 2 行，矮屏阶梯先于
             Tips 撤回 1 行（launchpadLayout 的 heroGapRows）——刻意呼吸，不是遗漏。 */}
         <Box flexDirection="column" width={cardWidth} marginTop={layout.heroGapRows}>
+          {grammarPresentation && <GrammarFixActivity presentation={grammarPresentation} />}
           {/* 输入框：圆角边框里**只有输入那一行**（第三版：参数行移出框外）。
               边框在焦点回到输入框时提亮——终端里没有指针形状，颜色变化是
               唯一的「这里在等你打字」反馈。光标按闪烁相位切换样式。 */}

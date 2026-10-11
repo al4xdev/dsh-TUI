@@ -456,6 +456,42 @@ function cellAtText(term: InstanceType<typeof XTerm>, lines: readonly string[], 
 /** 一行里同时含全部 needle。 */
 const rowHasAll = (line: string, needles: readonly string[]): boolean => needles.every(n => line.includes(n))
 
+{
+  const bridgeKey = Symbol.for('alex.dsh.grammar-fix')
+  const bridges = globalThis as Record<symbol, unknown>
+  const previous = bridges[bridgeKey]
+  const pending: { resolve: (text: string) => void; signal?: AbortSignal }[] = []
+  bridges[bridgeKey] = {
+    describe: () => ({ language: 'English', model: 'grammar-model' }),
+    fix: (_text: string, _current: unknown, signal?: AbortSignal) => new Promise<string>(resolve => {
+      pending.push({ resolve, signal })
+    }),
+  }
+  const ev: Ev[] = []
+  const s = await openLaunchpad(ev, { query: 'I has a draft' })
+  try {
+    await s.send('\u0007')
+    await settled(() => s.screen().includes('grammar-model') && s.screen().includes('English'))
+    check('grammar activity shows bridge metadata', pending.length === 1 && s.screen().includes('English'), s.screen())
+    await s.send('\u001b')
+    check('grammar cancellation preserves draft', pending[0]?.signal?.aborted === true && last(ev, 'query') === undefined)
+    await s.send('\u0007')
+    await settled(() => pending.length === 2 && s.screen().includes('grammar-model'))
+    pending[0]!.resolve('stale correction')
+    await new Promise<void>(resolve => setImmediate(resolve))
+    check('canceled operation cannot clear newer activity', s.screen().includes('grammar-model') && last(ev, 'query') === undefined)
+    pending[1]!.resolve('I have a draft')
+    await settled(() => last(ev, 'query')?.value === 'I have a draft' && !s.screen().includes('grammar-model'))
+    check('grammar result updates draft and clears activity', last(ev, 'query')?.value === 'I have a draft')
+    await s.send('\u001a')
+    check('grammar undo restores original draft', last(ev, 'query')?.value === 'I has a draft')
+  } finally {
+    s.close()
+    if (previous === undefined) delete bridges[bridgeKey]
+    else bridges[bridgeKey] = previous
+  }
+}
+
 // ── A. 版面 ─────────────────────────────────────────────────────────────────
 const baseEvents: Ev[] = []
 const base = await openLaunchpad(baseEvents)
@@ -2627,6 +2663,7 @@ for (const cols of [120, 100, 72, 60, 48]) {
     JSON.stringify(ev2.slice(before2)))
   s2.close()
 }
+
 
 if (failures === 0) console.log(`\nverify-launchpad: ${checks} checks, all passed`)
 else console.error(`\nverify-launchpad: ${failures} of ${checks} checks FAILED`)
