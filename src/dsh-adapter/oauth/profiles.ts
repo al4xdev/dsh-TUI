@@ -15,6 +15,7 @@
  */
 
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
+import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { UPSTREAM_RETRY_MAX_RETRIES, UPSTREAM_RETRYABLE_CODES } from '../channel/upstream-retry.js'
 import { adapterBuiltinProviders, type PiAiProvider } from './pi-ai.js'
@@ -115,10 +116,12 @@ function withModelOverrides(
  * @param id - the OAuth provider route to mount.
  * @param modelOverrides - optional per-model catalog overrides (see
  *   {@link ModelOverride}); `undefined` serves the installed catalog unchanged.
+ * @param retryPolicy - optional provider-owned policy; omission keeps Harness defaults.
  */
 export function buildOAuthProfile(
   id: string,
   modelOverrides?: Readonly<Record<string, ModelOverride>>,
+  retryPolicy?: RetryPolicyConfig,
 ): ResolvedPiAiProviderProfile {
   if (!(OAUTH_PROVIDER_IDS as readonly string[]).includes(id)) {
     throw new Error(`dsh-auth: "${id}" is not an OAuth provider this build mounts (${OAUTH_PROVIDER_IDS.join(', ')})`)
@@ -131,11 +134,13 @@ export function buildOAuthProfile(
     provider: id,
     displayName: catalog.name,
     streamIdleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
-    // The widened upstream-retry codes (upstream-retry.ts): the stock
-    // default set would leave STREAM_CLOSED — a dropped upstream stream
-    // — un-retried on this plugin's own routes too.
+    // The widened upstream-retry codes (upstream-retry.ts) are the base: the
+    // stock default set would leave STREAM_CLOSED — a dropped upstream stream
+    // — un-retried on this plugin's own routes too. A provider-owned policy
+    // from config overrides field by field, so omitting `retryableCodes` there
+    // keeps the widened set instead of silently narrowing it.
     retryPolicy: resolveRetryPolicy(
-      { mode: 'normal', maxRetries: UPSTREAM_RETRY_MAX_RETRIES, retryableCodes: [...UPSTREAM_RETRYABLE_CODES] },
+      { mode: 'normal', maxRetries: UPSTREAM_RETRY_MAX_RETRIES, retryableCodes: [...UPSTREAM_RETRYABLE_CODES], ...retryPolicy },
       `dsh-auth: provider "${id}" retryPolicy`,
     ),
     configuredMaxTokens: new Map(),

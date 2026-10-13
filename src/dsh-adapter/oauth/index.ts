@@ -30,6 +30,15 @@
  *     #   openai-codex:
  *     #     gpt-5.6-sol:
  *     #       contextWindow: 1000000
+ *     # Optional provider-owned retries; other routes keep Harness defaults:
+ *     # retryPolicies:
+ *     #   openai-codex:
+ *     #     mode: normal
+ *     #     maxRetries: 9
+ *     #     backoff:
+ *     #       initialDelayMs: 5000
+ *     #       maxDelayMs: 1200000
+ *     #       jitterRatio: 0.1
  * ```
  *
  * Routes register individually: a route another adapter family already owns
@@ -45,7 +54,8 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
-import type { LlmAdapter, LlmModelInfo } from '@deepseek-ai/dsh-llm'
+import { RetryPolicySchema } from '@deepseek-ai/dsh-llm'
+import type { LlmAdapter, LlmModelInfo, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { PiAiAdapterOptions } from '@deepseek-ai/dsh-llm-pi-ai'
@@ -95,6 +105,8 @@ export interface Config {
    * ship — is refused, never skipped, so a typo lands as a boot error.
    */
   modelOverrides?: Record<string, Record<string, ModelOverride>>
+  /** Provider-owned retry policies; unmounted provider keys are refused at boot. */
+  retryPolicies?: Record<string, RetryPolicyConfig>
 }
 
 const modelOverride = z.object({
@@ -106,6 +118,7 @@ export const Config: z<Config> = z.object({
   providers: z.array(z.string()).default(availableOAuthProviderIds()),
   credentialsFile: z.string(),
   modelOverrides: z.dict(z.dict(modelOverride)),
+  retryPolicies: z.dict(RetryPolicySchema),
 })
 
 export type { DshAuthApi, DshAuthLoginResult, DshAuthSignInStatus, DshAuthService } from './service.js'
@@ -184,7 +197,14 @@ export function apply(ctx: Context, config: Config): void {
   // Profile construction validates the installed catalog loudly: a pi-ai
   // downgrade that dropped a provider fails the boot that asked for it, and
   // a per-model miss is refused per route (see buildOAuthProfile).
-  const profiles = new Map(configured.map(id => [id, buildOAuthProfile(id, overrides[id])]))
+  const retryPolicies = config.retryPolicies ?? {}
+  const unknownRetryProvider = Object.keys(retryPolicies).find(id => !configured.includes(id))
+  if (unknownRetryProvider !== undefined) {
+    throw new Error(
+      `dsh-auth: retryPolicies names provider "${unknownRetryProvider}", which is not among the mounted providers [${configured.join(', ')}]`,
+    )
+  }
+  const profiles = new Map(configured.map(id => [id, buildOAuthProfile(id, overrides[id], retryPolicies[id])]))
   const store = new CredentialFile(config.credentialsFile ?? defaultCredentialsFile())
 
   // Fail closed on store trouble: a credential file that cannot be read

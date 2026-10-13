@@ -60,6 +60,36 @@ autoApprove 的正确用法；其他参数原样转发。残留的原生选择�
 窄面板中的压缩状态保持单行：先省略阶段与取消提示，再缩短标签；计时只会完整显示，不拆开数字。
 
 
+## OAuth 提供商重试策略
+
+`dsh-tui-auth` 支持可选的 `retryPolicies`，按已挂载 provider id 配置。
+省略时保留 Harness 默认值，`modelOverrides` 独立生效。未知或未挂载的
+provider 键与非法策略会在启动时拒绝。将下例合入该行现有配置；profile
+覆盖会替换**整个** config，务必保留已有 `providers`、`credentialsFile`
+和 `modelOverrides`：
+
+```yaml
+- id: dsh-tui-auth
+  config:
+    retryPolicies:
+      openai-codex:
+        mode: normal
+        maxRetries: 9
+        backoff:
+          initialDelayMs: 5000
+          maxDelayMs: 1200000
+          jitterRatio: 0.1
+```
+
+这是官方 `llm-retry` 插件消费的 provider-owned 策略，agent preset 必须挂载
+该插件；不是请求 payload，也不是原生 Codex app-server 设置。此例仅改变
+Codex，默认瞬态错误码不变。每次失败 step 序列最多重试九次，共十次请求；
+名义等待为 5、10、20、40、80、160、320、640、1200 秒，总计 41 分 15 秒，
+另加请求耗时。抖动使最后等待为 18–20 分钟；可接受的 provider Retry-After
+替代本地等待，超过上限时 normal 模式仍快速失败。取消与卸载由官方运行时
+处理。通过新进程或重新挂载生效，不修改正在进行的重试预算。离线候选回归：
+`node scripts/verify-oauth-retry-policies.mjs --compiled-root /absolute/candidate/types`。
+
 ## 功能亮点
 
 没有可信 Component 身份的面板作为临时项：设置显示可读标题与本次运行的独立编号，勾选立即生效但不保存，无关设置修改会保留当前选择。旧 `actN:panel` 无法安全辨认来源，请移除占位项后重新选择当前面板。名称为 `actN` 的可信 Component 保留公开运行时地址；明确勾选时仅在持久偏好中使用 `component:actN:panel`，避免认领旧匿名项。
