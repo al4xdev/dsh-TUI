@@ -15,6 +15,7 @@
  */
 
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
+import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { adapterBuiltinProviders, type PiAiProvider } from './pi-ai.js'
 
@@ -114,10 +115,12 @@ function withModelOverrides(
  * @param id - the OAuth provider route to mount.
  * @param modelOverrides - optional per-model catalog overrides (see
  *   {@link ModelOverride}); `undefined` serves the installed catalog unchanged.
+ * @param retryPolicy - optional provider-owned policy; omission keeps Harness defaults.
  */
 export function buildOAuthProfile(
   id: string,
   modelOverrides?: Readonly<Record<string, ModelOverride>>,
+  retryPolicy?: RetryPolicyConfig,
 ): ResolvedPiAiProviderProfile {
   if (!(OAUTH_PROVIDER_IDS as readonly string[]).includes(id)) {
     throw new Error(`dsh-auth: "${id}" is not an OAuth provider this build mounts (${OAUTH_PROVIDER_IDS.join(', ')})`)
@@ -130,7 +133,7 @@ export function buildOAuthProfile(
     provider: id,
     displayName: catalog.name,
     streamIdleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
-    retryPolicy: resolveRetryPolicy(undefined, `dsh-auth: provider "${id}" retryPolicy`),
+    retryPolicy: resolveRetryPolicy(retryPolicy, `dsh-auth: provider "${id}" retryPolicy`),
     configuredMaxTokens: new Map(),
     piProvider: catalog,
     // Required since 0.1.5 (per-model pre-request diagnostics); this build

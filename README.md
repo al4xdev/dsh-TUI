@@ -64,6 +64,40 @@ plans always require fresh owner approval before execution.
 > rewind, a context progress bar, and a TPS gauge. It mounts as a pure plugin,
 > with no core changes. Install to enable; uninstall leaves no patches behind.
 
+## OAuth provider retry policies
+
+The `dsh-tui-auth` entry accepts optional `retryPolicies`, keyed by mounted
+provider id. Omission preserves Harness defaults; `modelOverrides` remains
+independent. Unknown/unmounted provider keys and malformed policies fail at boot.
+For example, merge this into the entry's existing config (profile overrides
+replace the **whole** config, so retain existing `providers`, `credentialsFile`
+and `modelOverrides`):
+
+```yaml
+- id: dsh-tui-auth
+  config:
+    retryPolicies:
+      openai-codex:
+        mode: normal
+        maxRetries: 9
+        backoff:
+          initialDelayMs: 5000
+          maxDelayMs: 1200000
+          jitterRatio: 0.1
+```
+
+This is a provider-owned policy consumed by the official `llm-retry` plugin,
+which must be mounted by the agent's preset; it is not a request payload or a
+native Codex app-server setting. Only Codex changes in this example. Default
+transient error codes remain unchanged. Nine retries allow ten requests per
+failed-step sequence: nominal waits are 5, 10, 20, 40, 80, 160, 320, 640 and
+1200 seconds (41m15s total, plus request durations). Jitter makes the last wait
+18–20 minutes; an accepted provider Retry-After replaces the local delay, while
+one above the cap remains fail-fast in normal mode. Cancellation/disposal stays
+with the official runtime. Apply via a new process/remount, not a live retry
+budget change. Offline candidate regression:
+`node scripts/verify-oauth-retry-policies.mjs --compiled-root /absolute/candidate/types`.
+
 ## Highlights
 
 - **Pixel whale pet** — three startup intros, click to wake; freezes after the first task.

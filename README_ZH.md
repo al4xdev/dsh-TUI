@@ -54,6 +54,36 @@ autoApprove 的正确用法；其他参数原样转发。残留的原生选择�
 > 面向 DeepSeek Harness 的交互式终端界面插件：像素鲸鱼顶栏、实时工作状态、流式思考展示、双击 Esc 时间回溯、上下文进度条与 TPS 仪表。
 > 零核心改动，纯插件挂载。安装即启用，卸载不留核心补丁。
 
+## OAuth 提供商重试策略
+
+`dsh-tui-auth` 支持可选的 `retryPolicies`，按已挂载 provider id 配置。
+省略时保留 Harness 默认值，`modelOverrides` 独立生效。未知或未挂载的
+provider 键与非法策略会在启动时拒绝。将下例合入该行现有配置；profile
+覆盖会替换**整个** config，务必保留已有 `providers`、`credentialsFile`
+和 `modelOverrides`：
+
+```yaml
+- id: dsh-tui-auth
+  config:
+    retryPolicies:
+      openai-codex:
+        mode: normal
+        maxRetries: 9
+        backoff:
+          initialDelayMs: 5000
+          maxDelayMs: 1200000
+          jitterRatio: 0.1
+```
+
+这是官方 `llm-retry` 插件消费的 provider-owned 策略，agent preset 必须挂载
+该插件；不是请求 payload，也不是原生 Codex app-server 设置。此例仅改变
+Codex，默认瞬态错误码不变。每次失败 step 序列最多重试九次，共十次请求；
+名义等待为 5、10、20、40、80、160、320、640、1200 秒，总计 41 分 15 秒，
+另加请求耗时。抖动使最后等待为 18–20 分钟；可接受的 provider Retry-After
+替代本地等待，超过上限时 normal 模式仍快速失败。取消与卸载由官方运行时
+处理。通过新进程或重新挂载生效，不修改正在进行的重试预算。离线候选回归：
+`node scripts/verify-oauth-retry-policies.mjs --compiled-root /absolute/candidate/types`。
+
 ## 功能亮点
 
 - **像素鲸鱼娘** — 开屏三选一动画，点击唤醒；开始第一个任务后定格。

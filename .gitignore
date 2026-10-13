@@ -11,6 +11,7 @@ package-lock.json
 /standalone/node_modules/
 /standalone/dist/
 .tmp/
+.dumps/
 .dsh-prompt-debug.json
 HANDOVER.md
 .local/
