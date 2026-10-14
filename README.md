@@ -375,6 +375,8 @@ History-only directories offer edit and new-session actions; rename and remove a
 
 **Background sessions**: On the DSH backend, `/bg` (alias `/background`) backgrounds the current session and opens the session manager on Favorites after a successful handoff; `←` on an empty prompt uses the same background flow but opens DSH. `Esc` returns as before. Background sessions run in this process and stop when the TUI exits. Logs survive. On Claude/Codex, those entries open the single-view session manager without backgrounding the session.
 
+On DSH, questionnaires from sessions whose background handles belong to this TUI remain answerable after `/bg`. The existing question panel can interrupt the session manager, and a pending question survives returning to its session. Other terminals' agents are not claimed.
+
 Full commands: [Interaction and commands](docs/interaction.en.md).
 
 ## Configuration & Extensions

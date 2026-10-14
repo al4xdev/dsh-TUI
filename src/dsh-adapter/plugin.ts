@@ -831,9 +831,9 @@ export async function apply(ctx: Context, runtimeConfig: RuntimeConfig<Config>, 
     notifyChannel(delivery.text, { color: delivery.color, timeoutMs: delivery.timeoutMs })
   })
   if (questionAnswererRegistration.kind === 'waterfall') {
-    // Ownership follows the mutable channel; registration cleanup belongs to
-    // this Cordis fiber.
-    questionAnswererRegistration.register(channel)
+    // The raw channel owns the foreground and parked handles; the UI facade
+    // is a different object and must not lose that background ownership.
+    questionAnswererRegistration.register(rawChannel)
   }
   // Fullscreen layout decision: the settings user layer (edited through the
   // /settings screen) overrides cordis.yml when set. The settings injection

@@ -73,6 +73,7 @@ import { createTreeRewindAction } from './session-tree-actions.js'
 import { createSkillCatalog } from './skill-catalog.js'
 import { createSubagentProjection, type SubagentsServiceView } from './subagent-projection.js'
 import { readChildTranscriptPage } from './subagent-transcript.js'
+import { bindHostedQuestionAgents } from '../questions-answerer.js'
 import { DSH_BACKEND_LABEL, type ChannelLaunchOptions } from './state.js'
 import { foldBack } from './transcript.js'
 import type { BackgroundResult, ResumeResult } from './types.js'
@@ -123,6 +124,13 @@ export function attachDshExtensions(
   // Detached handles are a stable ledger shared with adoption actions. The
   // agent-view factory itself starts only after the full state surface exists.
   const backgroundHandles = new Map<string, AgentHandle>()
+  owner.own(bindHostedQuestionAgents(state, agentId => {
+    if (!owner.current()) return false
+    for (const handle of backgroundHandles.values()) {
+      if (String(handle.agent.id) === agentId) return true
+    }
+    return false
+  }))
   let backgroundCurrentAction!: () => Promise<BackgroundResult>
   let agentView!: ReturnType<typeof createAgentViewProjection>
 
