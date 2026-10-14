@@ -194,15 +194,18 @@ Unrecognized keys are ignored, `Esc` does nothing, clear with `Ctrl+C`/`dd`.
 - Switch column `←/→`; move `↑/↓`/`PgUp`/`PgDn`; **typing = live filter** (by title/dir/branch/model).
 - Enter `Enter` (row 0 = new session in that workspace); new `Ctrl+Enter`/`Ctrl+N`; stop background session `Ctrl+X`.
 - `Ctrl+L` reload · `Enter` on the rail opens the action menu · `Esc` close hint → clear filter → leave.
-- Source tabs: when Claude Code / Codex / Grok Build / zcode have conversations on this machine, tabs appear on the right of the title row; switch with `Tab`/`Shift+Tab` or a click.
-  On a source tab `Enter`/click imports just that conversation and opens it (one imported before opens directly); a missing working directory is reported and nothing is imported; `Ctrl+L` rescans the source.
+- DSH view tabs: `Tab`/`Shift+Tab` or a click switches `DSH` ↔ `Favorites`, even with no favorites. `/bg` and `/background` open Favorites after the background handoff succeeds; `/resume`, `/home`, `/agentview`, the sessions button and `←` on an empty prompt start on DSH. No tab preference is remembered, and `/bg` does not automatically favorite a session. Empty Favorites keeps the existing message and New session card; `Esc` returns as before.
+- On DSH, `Ctrl+P` favorites/unfavorites the selected **list session**; the rail, New session card and empty list are no-ops. It uses the same favorite as the row's `★`/`☆`, without opening, starting or stopping a session. Chat's `Ctrl+P` loaded-context shortcut is unchanged.
+- **Favorites · all workspaces** includes marked, eligible sessions from all workspaces in the channel's DSH catalog, regardless of the selected rail workspace. The facts row shows an abbreviated working directory for TTY use. Existing status/occupancy indicators and live-first, then recent-first sorting remain; favorites do not get sorting priority.
+- The rail, New session card, arrows, `Enter` and filter keep their actions; filtering applies to the current view, switching views clears it, and new sessions still use the selected rail workspace. Empty Favorites says to select a session in DSH and press `Ctrl+P`; loading/no-match messages remain distinct.
+- No external-source probing, browsing or import occurs on this screen; use `/migrate` or `dsh-tui migrate`. Other kernels stay supported with a single-view manager and without these global favorites.
 - Mouse: click a session row = enter, click `★`/`☆` = toggle pin only, right-click a workspace row = action menu.
-- Empty input + `←` (or `/bg`) = send to background and open this screen, session keeps running.
+- On DSH, empty input + `←` sends to background and opens DSH; `/bg` (alias `/background`) uses the same background flow but opens Favorites after a successful handoff. The session keeps running.
 
 Switching sessions just parks the current one — the running turn keeps going.
 A session taken by another terminal shows red with `占用 pid <pid>`
 and can't be entered; it recovers after that terminal exits.
-Fixed items live in `~/.dsh-tui/session-pins.json`.
+DSH favorites live in `~/.dsh-tui/session-pins.json`.
 The workspace menu has four items: edit / new here / rename / remove from list (**removes the entry only**, directory and session log stay).
 After removal, a directory with past sessions remains in the rail as "History only"; the heading counts registrations and history directories separately, and a success notice confirms the removal.
 A "History only" row offers edit and new here; rename and remove apply only to registered workspaces.
@@ -333,7 +336,7 @@ The command menu = built-in commands (58, aliases included) + DSH registry comma
 |---|---|---|
 | `/new` | none | start a new session (no confirmation; the old session stays under `/resume`) |
 | `/resume` | none | open the **session manager** (workspace + session columns, live filter, pins, cross-workspace): switching just **parks** the outgoing session — it keeps running in the background and the active turn is not interrupted (like `/tree`: neither browsing nor switching cuts a running turn short; on the Claude backend a mid-turn switch is refused instead) |
-| `/home` / `/agentview` / `/bg` | none | the same session manager (`/home`=workspace view · `/agentview`=hosted session state · `/bg`=send to background and open, alias `/background`) |
+| `/home` / `/agentview` / `/bg` | none | the same session manager (`/home` and `/agentview` start on DSH; `/bg`, alias `/background`, opens Favorites on DSH after a successful background handoff; other kernels keep a single view) |
 | `/tree` | none | session fork tree: hover to preview, click to rewind / fork / switch branch |
 | `/fork` | none | copy the current session into a resumable clone (original unaffected) |
 | `/restart` | none | restart the process and resume this session (rejected mid-turn, `Ctrl+C` first) |

@@ -920,6 +920,9 @@ const dict = {
   'home-remove-detail': { zh: '只从列表移除，会话记录与磁盘目录都会保留', en: 'Only the list entry goes away; sessions and the directory stay' },
   // ── screens/SessionSupervisor.tsx（三合一会话管理：/resume /agentview /home）─
   'supervisor-title': { zh: '会话管理', en: 'Sessions' },
+  'supervisor-tab-favorites': { zh: '收藏', en: 'Favorites' },
+  'supervisor-favorites-title': { zh: '收藏 · 所有工作区', en: 'Favorites · all workspaces' },
+  'supervisor-no-favorites': { zh: '暂无收藏 · 在 DSH 中选中一个会话并按 Ctrl+P', en: 'No favorites yet · select a session in DSH and press Ctrl+P' },
   'supervisor-unregistered': { zh: '未登记的工作区', en: 'Unregistered' },
   'supervisor-history-only': { zh: '仅历史', en: 'History only' },
   'supervisor-workspace-groups': { zh: '工作区 {{registered}} · 历史目录 {{history}}', en: 'Workspaces {{registered}} · History {{history}}' },
@@ -929,6 +932,7 @@ const dict = {
   'supervisor-filter-placeholder': { zh: '输入以搜索会话…', en: 'Type to search sessions…' },
   'supervisor-hint-list': { zh: '**←/→** 切换栏位 · **Enter** 进入会话 · Ctrl+N 新建 · Ctrl+X 停止 · Esc 返回', en: '**←/→** switch pane · **Enter** enter · Ctrl+N new · Ctrl+X stop · Esc back' },
   'supervisor-hint-filter': { zh: '输入过滤会话 · **Enter** 进入 · Esc 清空', en: 'Type to filter · **Enter** enter · Esc clears' },
+  'supervisor-hint-pin': { zh: '**Ctrl+P** 收藏/取消收藏', en: '**Ctrl+P** favorite/unfavorite' },
   'supervisor-occupied': { zh: '被其他 TUI 终端占用（pid {{pid}}），无法进入', en: 'Held by another TUI terminal (pid {{pid}}) — cannot enter' },
   'supervisor-occupied-badge': { zh: '占用 pid {{pid}}', en: 'held by pid {{pid}}' },
   'supervisor-current': { zh: '当前', en: 'current' },
@@ -939,7 +943,7 @@ const dict = {
   'supervisor-stop-failed': { zh: '无法停止该会话', en: 'Could not stop that session' },
   'supervisor-stop-current': { zh: '不能停止当前正在使用的会话', en: 'The session you are attached to cannot be stopped' },
   'supervisor-open-failed': { zh: '无法进入会话「{{name}}」· {{reason}}', en: 'Could not enter {{name}} · {{reason}}' },
-  // 外部来源标签页（其他 coding agent 的会话，选中即导入）
+  // 原生后端的会话操作；DSH 收藏视图沿用同一个列表。
   'supervisor-hint-list-backend': { zh: '**←/→** 切换栏位 · **Enter** 进入会话 · Ctrl+R 重命名 · Ctrl+D 删除 · Esc 返回', en: '**←/→** switch pane · **Enter** enter · Ctrl+R rename · Ctrl+D delete · Esc back' },
   'supervisor-hint-list-archive': { zh: '**←/→** 切换栏位 · **Enter** 进入会话 · Ctrl+R 重命名 · Ctrl+D 归档 · Esc 返回', en: '**←/→** switch pane · **Enter** enter · Ctrl+R rename · Ctrl+D archive · Esc back' },
   'supervisor-archive-confirm': { zh: '归档会话「{{name}}」？原生对话记录保留 · **Enter** 确认 · Esc 取消', en: 'Archive session {{name}}? The native transcript is kept · **Enter** confirm · Esc cancel' },
@@ -951,7 +955,8 @@ const dict = {
   'supervisor-delete-current': { zh: '不能删除当前正在使用的会话', en: 'The session you are attached to cannot be deleted' },
   'supervisor-delete-failed': { zh: '无法删除会话「{{name}}」', en: 'Could not delete {{name}}' },
   'supervisor-deleted': { zh: '已删除会话「{{name}}」', en: 'Deleted session {{name}}' },
-  'supervisor-hint-tabs': { zh: '**Tab** 切换来源', en: '**Tab** switch source' },
+  'supervisor-hint-tabs': { zh: '**Tab** 切换视图', en: '**Tab** switch view' },
+  // 历史外部来源组件仍保留；当前 fork 的会话管理不挂载这些面板。
   'supervisor-foreign-sessions-title': { zh: '{{source}} · {{name}} 的会话', en: '{{source}} · sessions in {{name}}' },
   'supervisor-foreign-count': { zh: '共 {{total}}', en: '{{total}} total' },
   'supervisor-foreign-filter-placeholder': { zh: '输入以按标题或目录搜索…', en: 'Type to search by title or directory…' },

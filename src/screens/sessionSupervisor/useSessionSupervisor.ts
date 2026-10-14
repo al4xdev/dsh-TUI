@@ -25,7 +25,7 @@ import type { TuiWorkspaceEntry, TuiWorkspaceTarget } from '../../workspaces.js'
 import type { ChannelUi as Channel } from '../../adapter/channel/ui-policy.js'
 import type { ResumeResult } from '../../adapter/ports/channel-view.js'
 import { resumeFailureText } from '../../sessions/resumeFailure.js'
-import { RAIL_CHROME_ROWS, WORKSPACE_ROW_LINES, RAIL_MIN_TOTAL_COLUMNS, RAIL_WIDTH_MIN, RAIL_WIDTH_MAX, SESSION_ROW_LINES, SESSION_PANE_CHROME_ROWS, noticeLines, menuActionsFor, SupervisorLiveState, RailEntry, UNREGISTERED_RAIL_ID, message, samePath, sessionMatchesQuery } from './model.js'
+import { RAIL_CHROME_ROWS, WORKSPACE_ROW_LINES, RAIL_MIN_TOTAL_COLUMNS, RAIL_WIDTH_MIN, RAIL_WIDTH_MAX, SESSION_ROW_LINES, SESSION_PANE_CHROME_ROWS, noticeLines, menuActionsFor, SupervisorLiveState, RailEntry, UNREGISTERED_RAIL_ID, message, samePath, sessionMatchesQuery, type SessionSupervisorView } from './model.js'
 
 /**
  * The last successful listing, per channel, carried across mounts of this
@@ -77,6 +77,7 @@ function snapshotSlot(channel: Channel): ListingSnapshotSlot {
 /** Everything the screen owns that the model needs to read. */
 export interface SessionSupervisorInput {
   readonly channel: Channel
+  readonly initialView?: SessionSupervisorView
   /** Home directory, for collapsing paths to `~`. */
   readonly home: string
   /** Mount a persisted session (the channel unified resume path). */
@@ -97,7 +98,7 @@ export interface SessionSupervisorInput {
  * @returns Every value the screen renders from, plus the action callbacks.
  */
 export function useSessionSupervisor(input: SessionSupervisorInput) {
-  const { channel, home, onOpenSession, onNewSession, onStopSession, liveStateOf, columns, rows } = input
+  const { channel, home, initialView, onOpenSession, onNewSession, onStopSession, liveStateOf, columns, rows } = input
   /**
    * The bound backend: the screen lists ITS sessions. A DSH
    * channel (or a partial headless one without a snapshot) keeps today's
@@ -292,8 +293,23 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
    * cursor. Exactly one at a time: two cursors mean "where does Enter go?" has
    * no answer, and ←/→ is how this screen answers it.
    */
-  const [activePane, setActivePane] = useState<'rail' | 'list'>('rail')
+  const [activePane, setActivePane] = useState<'rail' | 'list'>(() => dshBackend && initialView === 'favorites' ? 'list' : 'rail')
+  // Catalog rows may arrive after mount. Only the untouched initial Favorites
+  // entry may choose its first row; later refreshes must never steal focus.
+  const initialFavoriteFocus = useRef(dshBackend && initialView === 'favorites')
   const [pins, setPins] = useState<ReadonlySet<string>>(() => readSessionPins(pinsDir))
+  // A batch of keypresses can toggle twice before React publishes a render.
+  const pinsRef = useRef(pins)
+  pinsRef.current = pins
+  const [view, setView] = useState<SessionSupervisorView>(() => dshBackend && initialView === 'favorites' ? 'favorites' : 'sessions')
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const selectView = useCallback((next: SessionSupervisorView): void => {
+    initialFavoriteFocus.current = false
+    if (next === 'favorites' && !dshBackend) return
+    viewRef.current = next
+    setView(next)
+  }, [dshBackend])
   /** A stored session being renamed / confirmed for deletion (non-DSH rows). */
   const [sessionRename, setSessionRename] = useState<{ id: string; draft: string } | undefined>(undefined)
   const [confirmDelete, setConfirmDelete] = useState<string | undefined>(undefined)
@@ -475,25 +491,44 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
     return railEntries[0]
   }, [railEntries, selectedPath, selectedUnregisteredId])
 
+  const compareSessions = useCallback((left: SessionSummary, right: SessionSummary): number => {
+    const leftLive = liveStateOf(left.id)?.live === true ? 1 : 0
+    const rightLive = liveStateOf(right.id)?.live === true ? 1 : 0
+    return rightLive - leftLive || right.updatedAt - left.updatedAt
+  }, [liveStateOf])
+
   /**
-   * Sessions whose recorded cwd is the selected workspace, minus the search
-   * filter. Live sessions in this workspace sort above stopped ones, then by
+   * Sessions in the selected workspace, or eligible favorites from every cwd,
+   * minus the existing search filter. Live sessions sort above stopped ones, then by
    * recency: what this terminal is currently running is what the user is
    * most likely switching between.
    */
   const visibleSessions = useMemo(() => {
-    if (selected === undefined) return []
+    // Favorites do not depend on a registry entry or a selected workspace.
+    const candidates = view === 'favorites' && dshBackend
+      ? listedSessions.filter(session => pins.has(session.id))
+      : selected === undefined ? [] : groupedEntries.get(selected.path) ?? []
     const needle = query.trim().toLowerCase()
     void pulse
-    return (groupedEntries.get(selected.path) ?? [])
+    return candidates
       .filter(session => sessionMatchesQuery(session, needle))
       .slice()
-      .sort((left, right) => {
-        const leftLive = liveStateOf(left.id)?.live === true ? 1 : 0
-        const rightLive = liveStateOf(right.id)?.live === true ? 1 : 0
-        return rightLive - leftLive || right.updatedAt - left.updatedAt
-      })
-  }, [groupedEntries, selected, query, liveStateOf, pulse])
+      .sort(compareSessions)
+  }, [view, dshBackend, listedSessions, pins, groupedEntries, selected, query, compareSessions, pulse])
+
+  React.useEffect(() => {
+    if (!initialFavoriteFocus.current) return
+    if (view !== 'favorites' || activePane !== 'list' || focusSessionId !== undefined || query !== '') {
+      initialFavoriteFocus.current = false
+      return
+    }
+    if (visibleSessions.length === 0) {
+      if (!loading && !refreshing) initialFavoriteFocus.current = false
+      return
+    }
+    initialFavoriteFocus.current = false
+    setFocusSessionId(visibleSessions[0]?.id)
+  }, [visibleSessions, loading, refreshing, view, activePane, focusSessionId, query])
 
   /**
    * Cursor identity: rows reorder on every reload and filter, so the cursor
@@ -532,6 +567,7 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
    * on a row the user never looked at.
    */
   const activateList = useCallback((): void => {
+    initialFavoriteFocus.current = false
     setActivePane('list')
     const current = visibleSessions.find(session => liveStateOf(session.id)?.current === true)
     setFocusSessionId(current?.id)
@@ -539,6 +575,7 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
 
   /** Enter the workspace column. */
   const activateRail = useCallback((): void => {
+    initialFavoriteFocus.current = false
     setActivePane('rail')
   }, [])
 
@@ -574,14 +611,28 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
     setNotice({ text, tone })
   }, [])
 
-  const persistPin = useCallback((id: string, pinned: boolean): void => {
+  const persistPin = useCallback((id: string, pinned: boolean): boolean => {
     const result = setSessionPinned(id, pinned, pinsDir)
     if (!result.ok) {
       report(t('resume-pin-save-failed'), 'error')
-      return
+      return false
     }
+    pinsRef.current = result.pins
     setPins(result.pins)
-  }, [report, pinsDir])
+    // Do not leave an invisible id waiting to steal the cursor when re-pinned.
+    if (viewRef.current === 'favorites' && !pinned && visibleSessions[sessionIndex - 1]?.id === id) {
+      const remaining = listedSessions
+        .filter(session => result.pins.has(session.id) && sessionMatchesQuery(session, queryRef.current.trim().toLowerCase()))
+        .sort(compareSessions)
+      setFocusSessionId(remaining[0]?.id)
+    }
+    return true
+  }, [report, pinsDir, viewRef, visibleSessions, sessionIndex, listedSessions, compareSessions])
+
+  const togglePin = useCallback((id: string): { ok: boolean; pinned: boolean } => {
+    const pinned = !pinsRef.current.has(id)
+    return { ok: persistPin(id, pinned), pinned }
+  }, [persistPin])
 
   /** Rename a stored session through the backend's catalog (non-DSH rows). */
   const renameSession = useCallback((sessionId: string, title: string): void => {
@@ -626,6 +677,7 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
   }, [archiveSessions, channel, holderOf, liveStateOf, reload, report])
 
   const selectEntry = useCallback((entry: RailEntry): void => {
+    initialFavoriteFocus.current = false
     setSelectedPath(entry.from === 'registry' ? entry.path : undefined)
     setSelectedUnregisteredId(entry.from === 'unregistered' ? entry.id : undefined)
     setSelectionManual(true)
@@ -662,6 +714,7 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
   }, [holderOf, onOpenSession, report])
 
   const newSessionIn = useCallback((entry: TuiWorkspaceEntry): void => {
+    initialFavoriteFocus.current = false
     setNotice(undefined)
     void channel.resolveWorkspace(entry.path)
       .then((target) => {
@@ -754,6 +807,7 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
   }, [railEntries, selectEntry])
 
   const moveSession = useCallback((by: 1 | -1): void => {
+    initialFavoriteFocus.current = false
     // +1: the cursor space includes the new-session card as row 0, and with an
     // EMPTY list the card is still a row the user can stand on. Clamping the
     // index at 0 instead would have made ↓/↑ do nothing at all there.
@@ -795,6 +849,9 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
     setFocusSessionId,
     activePane,
     pins,
+    view,
+    viewRef,
+    selectView,
     menu,
     setMenu,
     rename,
@@ -819,7 +876,7 @@ export function useSessionSupervisor(input: SessionSupervisorInput) {
     railEntryCapacity,
     sessionListHeight,
     noticeRows,
-    persistPin,
+    togglePin,
     selectEntry,
     openSession,
     newSessionIn,

@@ -98,17 +98,22 @@ Browse afterwards with `/resume`: sessions land in per-cwd directories
 conversations with thinking render as collapsible reasoning blocks in the
 TUI.
 
-## Source tabs on the session screen
+## Session manager after migration
 
-When you do not want a bulk import, browse by source on the session screen
-(`/resume`, `/home`, `/agentview`): the title row shows a tab for every source
-with conversations, and selecting one **imports just that conversation** and
-opens it.
+In this fork, the session manager (`/resume`, `/home`, `/agentview`) no longer
+probes, browses or imports external sources. The DSH view tabs are `DSH` and
+`Favorites`, not source tabs. Use `/migrate` or `dsh-tui migrate` for imports;
+their parsing, deterministic session IDs and behavior are unchanged.
 
-- Parsing is exactly `/migrate`'s, and the session id is derived from the source conversation the same way: both entries land a conversation on the same DSH session, and one already imported simply opens.
-- Opening the session screen only checks whether each source has any conversation (each source's walk stops at its first candidate); a source's list is read when its tab is opened, from a summary scan (file heads/tails only). Within one run an unchanged conversation is not read again; no cache file is written.
-- A conversation whose working directory no longer exists is not imported; the screen says so, and `/migrate` still imports it in bulk.
-- The tabs do not change how `/migrate` or `dsh-tui migrate` behave.
+Once imported, a conversation is a DSH session: browse it in its original
+workspace, select it in the list pane and press `Ctrl+P` to favorite it.
+`Tab`/`Shift+Tab` switches to Favorites across all workspaces in the channel's
+DSH catalog. `/resume`, `/home`, `/agentview`, the sessions button and empty-prompt
+`←` start on DSH; `/bg` and `/background` open Favorites after a successful
+background handoff, without automatically favoriting a session or remembering
+a tab preference. Marking or switching views does not open a session.
+Native Claude/Codex kernels remain supported separately and
+keep their single-view session managers without these global favorites.
 
 ## Smart migration hint
 

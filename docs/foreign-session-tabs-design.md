@@ -1,7 +1,11 @@
 # dsh-tui 会话屏「外部来源」标签页 + 迁移源重构：详细设计
 
+> **本 fork 的 UI 状态 / UI status in this fork（plan 55 r2 + 60 r1）**：下文的外部来源标签页是历史设计，已被 `DSH` ↔「收藏」视图取代。会话管理不再挂载外部浏览面板，也不在打开/切换视图时探测、扫描或导入外部来源。DSH 会话栏的 `Ctrl+P` 标记/取消标记所选会话，「收藏」汇集当前通道 DSH 目录中所有工作区的收藏。`/bg` 与 `/background` 在转后台交接成功后打开收藏；`/resume`、`/home`、`/agentview`、会话按钮与空输入 `←` 仍从 DSH 开始，不记忆标签偏好，也不自动收藏会话。**这里只替换 UI，不删除迁移解析、facade 或其他后端支持**；`/migrate` 和 `dsh-tui migrate` 的解析与导入行为保留。
+>
+> The external-source tabs below are historical and superseded in this fork by `DSH` ↔ `Favorites`. The manager no longer mounts foreign browsing panels or probes/scans/imports sources when opened or switched. `Ctrl+P` toggles the selected DSH list session's favorite; Favorites spans all workspaces in the channel's DSH catalog. `/bg` and `/background` open Favorites after a successful background handoff; `/resume`, `/home`, `/agentview`, the sessions button and empty-prompt `←` still start on DSH. No tab preference is remembered and no session is automatically favorited. **Only the UI is superseded: migration parsing, facades and other backend support remain**, as do `/migrate` and `dsh-tui migrate`.
+
 - 日期：2026-09-26
-- 状态：已实现，合为一个 PR（ccch1mneyyy/dsh-TUI#1066）。评审后按维护者要求收窄了浏览层：去掉 catalog 与快照、Channel API 由 5 个方法收为 3 个、外部格式知识只留在 migrate 内部、打开 `/resume` 不再做外部 IO（§2、§5、§8.4，见 §12）。实现中的其余偏离已写回 §2–§8
+- 历史状态：曾实现，合为一个 PR（ccch1mneyyy/dsh-TUI#1066）；本 fork 的标签 UI 已被上述收藏视图取代。评审后按维护者要求收窄了浏览层：去掉 catalog 与快照、Channel API 由 5 个方法收为 3 个、外部格式知识只留在 migrate 内部、打开 `/resume` 不再做外部 IO（§2、§5、§8.4，见 §12）。历史实现中的其余偏离已写回 §2–§8
 - 范围：`src/dsh-adapter/migrate/`（四个源的解析重构）、会话屏（`/resume` / `/agentview` / `/home`）新增外部来源标签页
 - 参考：dsh-chat-import（DSH 插件，同样做外部会话导入）的格式处理。本文只借鉴规则，**不依赖**该插件——用户不一定装了它
 

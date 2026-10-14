@@ -33,6 +33,10 @@ export const RAIL_WIDTH_MAX = 38
 export const SESSION_ROW_LINES = 2
 /** Chrome the right pane spends on banner, filter, new-session card, notice and hints. */
 export const SESSION_PANE_CHROME_ROWS = 8
+/** DSH's workspace listing or its favorites across the same persistence source. */
+export type SessionSupervisorView = 'sessions' | 'favorites'
+export const SESSION_TAB = 'DSH'
+export const FAVORITES_TAB = 'favorites'
 /**
  * Most rows the notice may grow to. A mount refusal carries the adapter's own
  * error text, which is routinely longer than one row; three rows show it in

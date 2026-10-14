@@ -1,5 +1,4 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react'
-import { basename } from 'node:path'
 import { Box, Text, useInput, useTerminalSize } from '../ui.js'
 import { t } from '../i18n.js'
 import type { ContextMenuEvent } from '../ink/events/context-menu-event.js'
@@ -17,20 +16,14 @@ import type { PermissionPanelDecision, PermissionPanelOutcome, PermissionPanelSn
 import { useTerminalFocus } from '../ink/hooks/use-terminal-focus.js'
 import { useAnimationFrame } from '../ink/hooks/use-animation-frame.js'
 import { isPlainReturn, isMod } from '../utils/modifiers.js'
-import { truncateWidth } from '../sessions/format.js'
-import { normalizeWorkspaceCwd } from '../sessions/view.js'
-import { readSessionPins, setSessionPinned } from '../sessionPins.js'
-import { readSessionOwners, type SessionMountOwner } from '../sessionMounts.js'
-import type { SessionSummary } from '../dsh-adapter/sessions/index.js'
+import { formatProject, truncateWidth } from '../sessions/format.js'
 import type { TuiWorkspaceEntry, TuiWorkspaceTarget } from '../workspaces.js'
 import type { ChannelUi as Channel } from '../adapter/channel/ui-policy.js'
 import type { ResumeResult } from '../adapter/ports/channel-view.js'
 import { useSessionSupervisor } from './sessionSupervisor/useSessionSupervisor.js'
-import { DSH_TAB, useForeignSessions } from './sessionSupervisor/useForeignSessions.js'
-import { ForeignSessionPanes } from './sessionSupervisor/ForeignSessionPanes.js'
 import { SourceTabs, layoutSourceTabs, sourceTabsWidth, type SourceTab } from '../components/sessions/SourceTabs.js'
 import { stringWidth } from '../ink/stringWidth.js'
-import { RAIL_CHROME_ROWS, WORKSPACE_ROW_LINES, RAIL_MIN_TOTAL_COLUMNS, RAIL_WIDTH_MIN, RAIL_WIDTH_MAX, SESSION_ROW_LINES, SESSION_PANE_CHROME_ROWS, MENU_WIDTH, MENU_LABEL_KEYS, menuActionsFor, SupervisorLiveState, RailEntry, UNREGISTERED_RAIL_ID, message, samePath, sessionMatchesQuery } from './sessionSupervisor/model.js'
+import { WORKSPACE_ROW_LINES, SESSION_ROW_LINES, MENU_WIDTH, MENU_LABEL_KEYS, menuActionsFor, type SupervisorLiveState, type SessionSupervisorView, samePath, sessionMatchesQuery, SESSION_TAB, FAVORITES_TAB } from './sessionSupervisor/model.js'
 export { sessionMatchesQuery }
 
 /**
@@ -71,8 +64,11 @@ export function SessionSupervisor({
   approval,
   onApprove,
   liveStateOf,
+  initialView,
 }: {
   channel: Channel
+  /** Opening route only; changing this prop does not override the user's Tab. */
+  initialView?: SessionSupervisorView
   /** Home directory, for collapsing paths to `~`. */
   home: string
   /** Leave the screen and show the conversation. */
@@ -111,7 +107,6 @@ export function SessionSupervisor({
     renameSession,
     deleteSession,
     entries,
-    sessions,
     loading,
     refreshing,
     notice,
@@ -127,6 +122,9 @@ export function SessionSupervisor({
     setFocusSessionId,
     activePane,
     pins,
+    view,
+    viewRef,
+    selectView,
     menu,
     setMenu,
     rename,
@@ -151,7 +149,7 @@ export function SessionSupervisor({
     railEntryCapacity,
     sessionListHeight,
     noticeRows,
-    persistPin,
+    togglePin,
     selectEntry,
     openSession,
     newSessionIn,
@@ -163,17 +161,12 @@ export function SessionSupervisor({
     moveRail,
     moveSession,
     focusedSession,
-  } = useSessionSupervisor({ channel, home, onOpenSession, onNewSession, onStopSession, liveStateOf, columns, rows })
+  } = useSessionSupervisor({ channel, home, initialView, onOpenSession, onNewSession, onStopSession, liveStateOf, columns, rows })
   const menuEntry = menu === undefined ? undefined : railEntries.find(entry => samePath(entry.path, menu.path))
   const menuActions = menuEntry === undefined ? [] : menuActionsFor(menuEntry)
 
-  /**
-   * The source tab: this screen's own sessions ({@link DSH_TAB}) or another
-   * coding agent's, by agent id. Every open starts on DSH — the screen is
-   * where you manage your sessions first, and a foreign tab is a place you
-   * visit.
-   */
-  const [tab, setTab] = useState<string>(DSH_TAB)
+  const favorites = view === 'favorites'
+  const tab = favorites ? FAVORITES_TAB : SESSION_TAB
   /** The `+N` dropdown of folded tabs, anchored where it was clicked. */
   const [tabMenu, setTabMenu] = useState<{ col: number; row: number; item: number } | undefined>(undefined)
   const tabMenuRef = useRef(tabMenu)
@@ -181,50 +174,48 @@ export function SessionSupervisor({
   /** The session-rename draft as the keyboard sees it (see the input handler). */
   const sessionRenameRef = useRef(sessionRename)
   sessionRenameRef.current = sessionRename
-  const foreign = useForeignSessions({ channel, tab, registry: entries, query, setNotice, onOpenSession })
-
-  /**
-   * Only sources with data get a tab, after DSH, in a fixed order: ranking
-   * them by recency would mean stat-ing every conversation of every source
-   * each time this screen opens.
-   */
   const tabs = useMemo<readonly SourceTab[]>(() => {
-    // Another backend's screen lists that backend's sessions: its one tab
-    // names it (foreign imports are a DSH feature and never probed there).
+    // Other backends retain their own catalog and isolated pin store.
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- runtime guard: headless hosts pass partial channels
-    if (!dshBackend) return [{ id: DSH_TAB, label: channel.backendCapabilities?.backendLabel ?? DSH_TAB }]
-    if (foreign.sources.length === 0) return []
-    return [{ id: DSH_TAB, label: 'DSH' }, ...foreign.sources.map(source => ({ id: source.agentId, label: source.label }))]
-  }, [foreign.sources, dshBackend, channel.backendCapabilities])
-  const activeSource = foreign.sources.find(source => source.agentId === tab)
-
-  // A source that vanished on refresh takes its tab with it; land on DSH
-  // rather than on a tab the strip no longer draws.
-  React.useEffect(() => {
-    if (tab !== DSH_TAB && activeSource === undefined) setTab(DSH_TAB)
-  }, [tab, activeSource])
+    if (!dshBackend) return [{ id: SESSION_TAB, label: channel.backendCapabilities?.backendLabel ?? SESSION_TAB }]
+    return [{ id: SESSION_TAB, label: 'DSH' }, { id: FAVORITES_TAB, label: t('supervisor-tab-favorites') }]
+  }, [dshBackend, channel.backendCapabilities])
 
   const closeTabMenu = useCallback((): void => {
     tabMenuRef.current = undefined
     setTabMenu(undefined)
   }, [])
 
-  /** Switch source. The query and notice belong to the tab they were made on. */
+  /** Both views use the same catalog, focus and actions, not separate channels. */
   const switchTab = useCallback((id: string): void => {
+    if (approval !== null || sessionRename !== undefined || confirmDelete !== undefined || rename !== undefined || confirmRemove !== undefined) return
+    if (id !== SESSION_TAB && id !== FAVORITES_TAB) return
+    if (id === FAVORITES_TAB && !dshBackend) return
     closeMenu()
     closeTabMenu()
+    queryRef.current = ''
     setQuery('')
     setNotice(undefined)
-    setTab(id)
-  }, [closeMenu, closeTabMenu, setQuery, setNotice])
+    selectView(id === FAVORITES_TAB ? 'favorites' : 'sessions')
+  }, [approval, sessionRename, confirmDelete, rename, confirmRemove, dshBackend, closeMenu, closeTabMenu, queryRef, setQuery, setNotice, selectView])
 
   const cycleTab = useCallback((by: 1 | -1): void => {
     if (tabs.length < 2) return
-    const index = Math.max(0, tabs.findIndex(candidate => candidate.id === tab))
+    const current = viewRef.current === 'favorites' ? FAVORITES_TAB : SESSION_TAB
+    const index = Math.max(0, tabs.findIndex(candidate => candidate.id === current))
     switchTab(tabs[(index + by + tabs.length) % tabs.length]!.id)
-  }, [tabs, tab, switchTab])
+  }, [tabs, viewRef, switchTab])
+
+  const toggleSessionPin = useCallback((id: string): void => {
+    if (approval !== null || sessionRename !== undefined || confirmDelete !== undefined || rename !== undefined || confirmRemove !== undefined || menuRef.current !== undefined || tabMenuRef.current !== undefined) return
+    const result = togglePin(id)
+    // Use the committed toggle, not rendered pins, for batched unpin/re-pin.
+    if (result.ok && (viewRef.current !== 'favorites' || result.pinned)) setFocusSessionId(id)
+  }, [approval, sessionRename, confirmDelete, rename, confirmRemove, menuRef, tabMenuRef, viewRef, togglePin, setFocusSessionId])
 
   useInput((input, key) => {
+    // Approval owns these new operations too, including the common click route.
+    if (approval !== null && (key.tab || (isMod(key) && input === 'p'))) return
     // Modal layers own the keyboard, in the same order they render.
     // The draft is read through a ref: keystrokes that arrive in one batch
     // (typing, then Enter) must commit everything typed, not the last render.
@@ -344,14 +335,8 @@ export function SessionSupervisor({
       return
     }
     if (key.tab) {
-      // Tab / Shift+Tab walk the source tabs. Shift+Tab used to open the
-      // focused workspace's menu, which Enter on the rail already does, so
-      // the route was given up to the tabs.
+      // Both directions alternate the workspace catalog and its global favorites.
       cycleTab(key.shift ? -1 : 1)
-      return
-    }
-    if (tab !== DSH_TAB) {
-      foreignKey(input, key)
       return
     }
     // ←/→ choose the column. There is exactly one `❯` on screen because exactly
@@ -395,6 +380,10 @@ export function SessionSupervisor({
     }
     if (isMod(key) && input === 'l') {
       void reload()
+      return
+    }
+    if (isMod(key) && input === 'p') {
+      if (dshBackend && activePane === 'list' && focusedSession !== undefined) toggleSessionPin(focusedSession.id)
       return
     }
     if (isMod(key) && input === 'x') {
@@ -460,64 +449,24 @@ export function SessionSupervisor({
   const [, spinnerTime] = useAnimationFrame(workingCount > 0 ? 120 : null)
   const spinnerFrame = Math.floor(spinnerTime / 120)
 
-  /**
-   * Keys on a source tab: the same pane model as DSH (←/→ pick the column,
-   * ↑/↓ move, typing filters), with what a foreign source cannot do left out —
-   * no workspace menu, no new session, no stop — and Ctrl+L rescanning the
-   * source instead of re-listing.
-   */
-  function foreignKey(input: string, key: Parameters<Parameters<typeof useInput>[0]>[1]): void {
-    if (key.leftArrow) {
-      foreign.activateRail()
-      return
-    }
-    if (key.rightArrow) {
-      foreign.activateList()
-      return
-    }
-    const by = key.upArrow || key.wheelUp || key.pageUp ? -1 : key.downArrow || key.wheelDown || key.pageDown ? 1 : 0
-    if (by !== 0) {
-      if (foreign.pane === 'rail') foreign.moveRail(by)
-      else foreign.moveList(by)
-      return
-    }
-    if (key.backspace || key.delete) {
-      setQuery(text => text.slice(0, -1))
-      return
-    }
-    if (isMod(key) && input === 'l') {
-      foreign.rescan()
-      return
-    }
-    if (isMod(key)) return
-    if (isPlainReturn(key)) {
-      // The rail has no menu here, so Enter on it steps into the list.
-      if (foreign.pane === 'rail') foreign.activateList()
-      else if (foreign.focusedRow !== undefined) foreign.openRow(foreign.focusedRow)
-      return
-    }
-    if (!key.meta && !key.super && input && !key.return) {
-      const typed = input.replace(/\p{Cc}/gu, '')
-      if (typed.length > 0) setQuery(text => text + typed)
-    }
-  }
-
-  // Header: title, subtitle, and the source strip on the right. Width runs
+  // Header: title, subtitle, and the view strip on the right. Width runs
   // out in a fixed order — the subtitle goes first, then trailing tabs fold
   // into `+N`; the active tab never folds.
   const titleText = ` ▣ ${t('supervisor-title')}`
   const subtitleText = `  ${t('supervisor-subtitle')}`
   /** One column between title and strip, one after the strip. */
   const HEADER_GAPS = 2
-  const fullStrip = tabs.length === 0 ? 0 : sourceTabsWidth(tabs, 0, DSH_TAB)
+  const fullStrip = tabs.length === 0 ? 0 : sourceTabsWidth(tabs, 0, SESSION_TAB)
   const showSubtitle = tabs.length === 0
     || stringWidth(titleText) + stringWidth(subtitleText) + HEADER_GAPS + fullStrip <= columns
   const tabBudget = columns - stringWidth(titleText) - (showSubtitle ? stringWidth(subtitleText) : 0) - HEADER_GAPS
   const tabLayout = layoutSourceTabs(tabs, tab, tabBudget)
   const tabMenuWidth = Math.max(12, ...tabLayout.hidden.map(hidden => stringWidth(hidden.label) + 6))
-  const withTabHint = (text: string): string => (tabs.length < 2 ? text : `${text} · ${t('supervisor-hint-tabs')}`)
+  // Put the view/pin keys first so narrow TTYs do not clip their discovery hints.
+  const withTabHint = (text: string): string => (tabs.length < 2 ? text : `${t('supervisor-hint-tabs')} · ${text}`)
 
   const listHint = dshBackend ? t('supervisor-hint-list') : t(archiveSessions ? 'supervisor-hint-list-archive' : 'supervisor-hint-list-backend')
+  const withPinHint = (text: string): string => dshBackend ? `${t('supervisor-hint-pin')} · ${text}` : text
   const railHint = rename !== undefined
     ? t('home-hint-rename')
     : confirmRemove !== undefined
@@ -569,7 +518,7 @@ export function SessionSupervisor({
             <SourceTabs
               layout={tabLayout}
               active={tab}
-              leadId={DSH_TAB}
+              leadId={SESSION_TAB}
               onSelect={switchTab}
               onOverflow={(event): void => {
                 closeMenu()
@@ -582,23 +531,6 @@ export function SessionSupervisor({
         )}
       </Box>
       <Divider bleed />
-      {tab !== DSH_TAB && (
-        <ForeignSessionPanes
-          model={foreign}
-          sourceLabel={activeSource?.label ?? tab}
-          home={home}
-          now={now}
-          query={query}
-          notice={notice}
-          railVisible={railVisible}
-          railWidth={railWidth}
-          railEntryCapacity={railEntryCapacity}
-          sessionWidth={sessionWidth}
-          rows={rows}
-          isTerminalFocused={isTerminalFocused}
-        />
-      )}
-      {tab === DSH_TAB && (
       <Box flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
         {railVisible && (
           <ink-box
@@ -677,7 +609,7 @@ export function SessionSupervisor({
         >
           <Box height={1} flexShrink={0} overflow="hidden">
             <Box flexShrink={1} overflow="hidden">
-              <Text color="remember" bold>{truncateWidth(` ${t('home-sessions-title', { name: selected?.title ?? t('supervisor-title') })}`, Math.max(4, sessionWidth - 3))}</Text>
+              <Text color="remember" bold>{truncateWidth(` ${favorites ? t('supervisor-favorites-title') : t('home-sessions-title', { name: selected?.title ?? t('supervisor-title') })}`, Math.max(4, sessionWidth - 3))}</Text>
               <Text dimColor>
                 {`  ${truncateWidth(
                   t('supervisor-counts', { working: workingCount, live: liveCount, total: visibleSessions.length }) + (refreshing ? ` · ${t('home-sessions-refreshing')}` : ''),
@@ -736,7 +668,7 @@ export function SessionSupervisor({
             {loading && <Text dimColor italic>{` ${truncateWidth(t('home-sessions-loading'), sessionWidth - 2)}`}</Text>}
             {!loading && visibleSessions.length === 0 && (
               <Text dimColor italic>
-                {` ${truncateWidth(filtered ? t('supervisor-no-matches') : t('home-no-sessions'), sessionWidth - 2)}`}
+                {` ${truncateWidth(filtered ? t('supervisor-no-matches') : favorites ? t('supervisor-no-favorites') : t('home-no-sessions'), sessionWidth - 2)}`}
               </Text>
             )}
             {visibleSessionRows.map((session, index) => {
@@ -750,6 +682,7 @@ export function SessionSupervisor({
                   depth={0}
                   focused={activePane === 'list' && sessionTop + index + 1 === sessionIndex}
                   pinned={pins.has(session.id)}
+                  workspaceLabel={favorites ? formatProject(session.cwd, home) : undefined}
                   now={now}
                   liveStatus={state?.live === true ? state.status : undefined}
                   current={state?.current === true}
@@ -761,10 +694,9 @@ export function SessionSupervisor({
                     openSession(session)
                   }}
                   onTogglePin={(): void => {
-                    setFocusSessionId(session.id)
-                    persistPin(session.id, !pins.has(session.id))
+                    toggleSessionPin(session.id)
                   }}
-                  onContextMenu={(event): void => {
+                  onContextMenu={favorites ? undefined : (event): void => {
                     setFocusSessionId(session.id)
                     const entry = selected
                     if (entry === undefined) return
@@ -783,12 +715,11 @@ export function SessionSupervisor({
           </Box>
           <Box flexShrink={0}>
             <Text dimColor italic>
-              <HintLine text={sessionRename !== undefined ? t('supervisor-hint-session-rename') : filtered ? t('supervisor-hint-filter') : withTabHint(listHint)} />
+              <HintLine text={sessionRename !== undefined ? t('supervisor-hint-session-rename') : withTabHint(withPinHint(filtered ? t('supervisor-hint-filter') : listHint))} />
             </Text>
           </Box>
         </Box>
       </Box>
-      )}
 
       {sessionRename !== undefined && (
         <Box height={1} flexShrink={0}>

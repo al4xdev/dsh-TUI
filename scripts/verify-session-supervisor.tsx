@@ -43,13 +43,10 @@
  * a cold scan stops showing nothing, and a partial answer from a superseded
  * call must not repaint.
  *
- * The source tabs (other coding agents' conversations) are pinned too: the
- * strip renders only when a source has data and degrades by width (subtitle
- * first, then trailing tabs into `+N`, never the active one); a click or
- * Tab / Shift+Tab switches source and clears the query; a source tab groups
- * by directory, filters by title and cwd, and Enter imports then opens the
- * deterministic id — a second Enter opens the existing copy; a conversation
- * whose directory is gone reports it and opens nothing.
+ * DSH / Favorites are always available, without probing foreign stores.
+ * Favorites use the same persistent pins and live session listing across all
+ * workspaces; keyboard pinning never opens a row, and focus reconciles after
+ * unpinning. Residual foreign layout/grouping helpers remain covered separately.
  *
  * Renders the real `SessionSupervisor` into an in-memory terminal with a stub
  * channel, then drives it with real stdin bytes (SGR mouse reports).
@@ -67,7 +64,8 @@ import { PassThrough, Writable } from 'node:stream'
 import React from 'react'
 import xterm from '@xterm/headless'
 import fakeHome from './lib/fake-home.mjs'
-import { findText, settled, sleep, viewportLines, writeParsed } from './lib/term-test.mjs'
+import { findText, settle, settled, sleep, viewportLines, writeParsed } from './lib/term-test.mjs'
+import type { PermissionPanelSnapshot } from '../src/channel/permissions.js'
 
 const { Terminal: XTerm } = xterm
 const [
@@ -78,12 +76,14 @@ const [
   // The REAL persistent listing cache, so one case can put actual bytes under
   // this run's fake home and prove the screen paints them.
   { beginListingSnapshot, readListingSnapshot },
+  { readSessionPins, writeSessionPins },
 ] = await Promise.all([
   import('../src/ui.js'),
   import('../src/screens/SessionSupervisor.js'),
   import('../src/components/sessions/SourceTabs.js'),
   import('../src/screens/sessionSupervisor/useForeignSessions.js'),
   import('../src/dsh-adapter/sessions/snapshot.js'),
+  import('../src/sessionPins.js'),
 ])
 
 let failures = 0
@@ -287,6 +287,15 @@ interface StubChannelConfig {
   readonly openResult?: { ok: true } | { ok: false; reason: 'failed'; error: string } | { ok: false; reason: 'cancelled' }
   /** Terminal width for this screen; {@link COLS} by default. */
   readonly cols?: number
+  /** Only entry routing chooses a view; normal mounts retain the default. */
+  readonly initialView?: 'sessions' | 'favorites'
+  readonly approval?: PermissionPanelSnapshot
+  readonly states?: Readonly<Record<string, {
+    status: 'working' | 'needs-input' | 'idle' | 'completed' | 'failed' | 'stopped'
+    live: boolean
+    current: boolean
+    summary: string
+  }>>
   /**
    * The persistent cache this channel reads.
    *
@@ -489,7 +498,8 @@ async function mountSupervisor(target: StubChannel): Promise<SupervisorScreen> {
         <SessionSupervisor
           channel={target.channel}
           home={sandbox}
-          onClose={() => {}}
+          initialView={target.config.initialView}
+          onClose={() => { target.calls.push('close') }}
           onOpenSession={async (id) => {
             // Same path Chat.tsx wires: the screen hands the row's id to the
             // channel, which is where "did Enter open the RIGHT row" is
@@ -497,11 +507,11 @@ async function mountSupervisor(target: StubChannel): Promise<SupervisorScreen> {
             await (target.channel as unknown as { resumeTo(id: string): Promise<{ ok: boolean }> }).resumeTo(id)
             return target.config.openResult ?? { ok: true }
           }}
-          onNewSession={async () => true}
-          onStopSession={async () => true}
-          approval={null}
-          onApprove={() => {}}
-          liveStateOf={(id) => liveState[id as keyof typeof liveState]}
+          onNewSession={async (workspace) => { target.calls.push(`new:${workspace.cwd}`); return true }}
+          onStopSession={async (id) => { target.calls.push(`stop:${id}`); return true }}
+          approval={target.config.approval ?? null}
+          onApprove={() => { target.calls.push('approve') }}
+          liveStateOf={(id) => target.config.states?.[id] ?? liveState[id as keyof typeof liveState]}
         />
       </AlternateScreen>
     </ThemeProvider>,
@@ -1657,7 +1667,7 @@ console.log('background title recovery updates the existing row')
   check('background metadata repaints the row', await settled(() => app.lines().join('\n').includes('recovered title')))
   app.close()
 }
-// ── source tabs: other coding agents' conversations ──────────────────────
+// ── residual source-tab helpers: migration utilities remain supported ─────
 
 const foreignRow = (over: Partial<ForeignRowFixture> & { key: string }): ForeignRowFixture => ({
   agentId: 'claude-code',
@@ -1732,204 +1742,394 @@ console.log('source tabs: pure layout and grouping')
   check('foreign search rejects a non-match', !foreignRowMatchesQuery(claudeRows[0] as never, 'zzzz'))
 }
 
-console.log('source tabs: no strip without sources')
-{
-  const app = await openSupervisor({ registry, cwd: alphaDir })
-  await settled(() => app.lines().join('\n').includes('Sessions in Alpha'))
-  check('a channel without the facade draws no tab strip', !app.lines()[0]!.includes('DSH'), app.lines()[0])
-  check('and keeps the subtitle', app.lines()[0]!.includes('switching does not stop them'), app.lines()[0])
-  app.close()
+// ── Favorites: one listing and one persistent pin store ────────────────────
+const favoritesHeader = 'Favorites · all workspaces'
+const pinFile = join(fakeHome, '.dsh-tui', 'session-pins.json')
+const seedPins = (ids: readonly string[]): void => {
+  if (!writeSessionPins(ids)) throw new Error('could not seed isolated pins')
 }
 
-console.log('source tabs: strip, switching and import')
-{
-  const app = await openSupervisor({ registry, cwd: alphaDir, foreign: foreignConfig })
+console.log('Favorites: the requested entry view is mount-local and DSH-only')
+for (const initialView of [undefined, 'sessions', 'favorites'] as const) {
+  seedPins(['free-one'])
+  const app = await openSupervisor({ registry, cwd: alphaDir, initialView })
   const shown = (): string => app.lines().join('\n')
-  const header = (): string => app.lines()[0] ?? ''
-  await settled(() => shown().includes('Sessions in Alpha') && header().includes('Claude Code'))
-  check('the strip renders in the header', /DSH\s*│\s*Claude Code\s+Codex/u.test(header()), header())
-  check('the screen opens on the DSH tab', shown().includes('free session'), shown())
-  check('the DSH hints name the Tab key', shown().includes('Tab switch source'), shown())
+  check(`DSH initialView ${initialView ?? 'omitted'} opens the requested view`,
+    await settled(() => initialView === 'favorites'
+      ? shown().includes(favoritesHeader) && shown().includes('free session') && !shown().includes('live session')
+      : shown().includes('Sessions in Alpha') && shown().includes('live session')), shown())
+  check('requested Favorites still uses real pins and the new card',
+    shown().includes('New session') && app.lines().some(line => line.includes('free session') && line.includes('★')), shown())
+  app.close()
+}
+const hasFocus = (app: SupervisorScreen, title: string): boolean =>
+  app.lines().some(line => line.includes(title) && line.includes('❯'))
+const noSessionActions = (app: SupervisorScreen): boolean =>
+  !app.calls.some(call => /^(resumeTo:|new:|stop:|close$)/u.test(call))
 
-  await app.click('Claude Code')
-  check(
-    'clicking a tab switches to that source',
-    await settled(() => shown().includes('Claude Code · sessions in Alpha')),
-    shown(),
-  )
-  check('the source was scanned', app.calls.includes('scan:claude-code'), app.calls.join(', '))
-  check('the DSH rows are gone', !shown().includes('free session'), shown())
-  check(
-    'the rail groups the source by directory',
-    shown().includes('dsh-tui-supervisor-ghost') && shown().includes('Unknown directory'),
-    shown(),
-  )
-  check('the list shows the selected directory only', shown().includes('fix the parser') && !shown().includes('ghost chat'), shown())
-  check('there is no new-session card', !shown().includes('+ New session'), shown())
+/** An observable query paint is the barrier for no-op/batched input checks. */
+async function queryBarrier(app: SupervisorScreen, text: string): Promise<void> {
+  app.write(text)
+  check(`query input barrier: ${text}`, await settled(() => app.lines().some(line => line.includes(`/ ${text}`))), app.lines().join('\n'))
+}
 
-  const cursorOn = (title: string): boolean => app.lines().some(line => line.includes(title) && line.includes('❯'))
-  app.write('\u001b[C')
-  check('→ lands the cursor on the first row (no card at 0)', await settled(() => cursorOn('fix the parser')), shown())
-  for (const character of 'docs') {
-    app.write(character)
-    await sleep(60) // 固定窗:pacing 逐字投喂：整串一次写入时首字符会被当作导航键吞掉
+console.log('Favorites entry: first sorted favorite owns Enter, not rail or current session')
+{
+  const entryRows = [
+    ...sessions,
+    session({ id: 'first-favorite', cwd: betaDir, title: { text: 'first favorite', source: 'prompt' }, updatedAt: now + 1_000_000 }),
+  ]
+  const states = { 'first-favorite': { status: 'working' as const, live: true, current: false, summary: 'background work' } }
+  for (const cache of [undefined, cacheCell(entryRows)]) {
+    seedPins(['live-one', 'first-favorite'])
+    const app = await openSupervisor({ registry, cwd: alphaDir, initialView: 'favorites', sessions: entryRows, states, cache })
+    check(`${cache === undefined ? 'cold' : 'cached'} Favorites entry selects the first sorted row`,
+      await settled(() => hasFocus(app, 'first favorite')), app.lines().join('\n'))
+    app.write('\r')
+    check('Enter immediately resumes the first favorite without Right or Down',
+      await settled(() => app.calls.includes('resumeTo:first-favorite'))
+      && !app.calls.includes('resumeTo:live-one') && !app.calls.some(call => call.startsWith('new:')), app.calls.join(', '))
+    app.close()
   }
-  check(
-    'typing filters by title',
-    await settled(() => shown().includes('write the docs') && !shown().includes('fix the parser')),
-    shown(),
-  )
-  check('the filtered cursor stands on a real row', await settled(() => cursorOn('write the docs')), shown())
-  await sleep(120) // 固定窗:pacing Enter 处理步间，无可观测锚点
+}
+
+console.log('Favorites entry: async rows autofocus only before user interaction')
+for (const interaction of ['none', 'rail', 'search', 'new-card'] as const) {
+  seedPins(['free-one'])
+  const gate = deferred()
+  const target = makeChannel({ registry, cwd: alphaDir, initialView: 'favorites', cache: cacheCell([]) })
+  target.plan = { defer: gate.promise }
+  const app = await mountSupervisor(target)
+  await settle(() => app.lines().join('\n').includes(favoritesHeader) && hasFocus(app, 'New session'))
+  if (interaction === 'rail') {
+    app.write('\u001b[D')
+    await settle(() => hasFocus(app, 'Alpha'))
+  } else if (interaction === 'search') await queryBarrier(app, 'free')
+  else if (interaction === 'new-card') {
+    await app.click('New session')
+    await settle(() => app.calls.includes(`new:${alphaDir}`))
+  }
+  gate.resolve()
+  await settle(() => target.landed > 0 && app.lines().join('\n').includes('free session'))
+  check(`late Favorites listing respects ${interaction === 'none' ? 'untouched initial focus' : interaction + ' interaction'}`,
+    await settled(() => hasFocus(app, interaction === 'none' ? 'free session' : interaction === 'rail' ? 'Alpha' : 'New session')),
+    app.lines().join('\n'))
+  if (interaction === 'none') {
+    app.write('\r')
+    check('async first favorite also owns immediate Enter', await settled(() => app.calls.includes('resumeTo:free-one')), app.calls.join(', '))
+  }
+  app.close()
+}
+
+console.log('Favorites entry: no favorites keeps the new-session card selectable')
+{
+  seedPins([])
+  const app = await openSupervisor({ registry, cwd: alphaDir, initialView: 'favorites', sessions: [] })
+  check('empty initial Favorites owns the list card', await settled(() => hasFocus(app, 'New session')), app.lines().join('\n'))
   app.write('\r')
-  check(
-    'Enter imports, then opens the deterministic id',
-    await settled(() => app.calls.includes('resumeTo:foreign-cc-2'), { timeoutMs: 4_000 }),
-    app.calls.join(', '),
-  )
-  check(
-    'the import ran before the open',
-    app.calls.indexOf('created:foreign-cc-2') >= 0
-      && app.calls.indexOf('created:foreign-cc-2') < app.calls.indexOf('resumeTo:foreign-cc-2'),
-    app.calls.join(', '),
-  )
-  await sleep(120) // 固定窗:pacing 第二次 Enter 前等导入的防重入标记释放
+  check('Enter on the initial empty card still creates in the selected workspace',
+    await settled(() => app.calls.includes(`new:${alphaDir}`)), app.calls.join(', '))
+  app.close()
+}
+
+console.log('Favorites: always available, no foreign facade activity')
+for (const foreign of [undefined, foreignConfig]) {
+  seedPins([])
+  const app = await openSupervisor({ registry, cwd: alphaDir, foreign })
+  const shown = (): string => app.lines().join('\n')
+  check('DSH and Favorites render even without a facade',
+    await settled(() => shown().includes('Sessions in Alpha') && app.lines()[0]!.includes('DSH') && app.lines()[0]!.includes('Favorites')), shown())
+  app.write('\t')
+  check('Tab reaches empty Favorites', await settled(() => shown().includes(favoritesHeader)), shown())
+  check('Favorites preserves rail and new-session card', shown().includes('Workspaces') && shown().includes('New session'), shown())
+  app.write('\u001b[Z')
+  check('Shift+Tab returns to DSH', await settled(() => shown().includes('Sessions in Alpha') && shown().includes('free session')), shown())
+  app.write('\u001b[Z')
+  check('Shift+Tab wraps back to Favorites', await settled(() => shown().includes(favoritesHeader)), shown())
+  await app.click('DSH')
+  check('clicking DSH switches back', await settled(() => shown().includes('Sessions in Alpha')), shown())
+  await app.click('Favorites')
+  check('clicking Favorites switches tabs', await settled(() => shown().includes(favoritesHeader)), shown())
+  check('tab switches do not open, create or stop sessions', noSessionActions(app), app.calls.join(', '))
+  check('no probe, scan or import runs even when facade exists', !app.calls.some(call => /^(probe$|scan:|import:)/u.test(call)), app.calls.join(', '))
+  app.close()
+}
+
+const favoriteRows = [
+  ...sessions,
+  session({ id: 'beta-old', cwd: betaDir, title: { text: 'beta older', source: 'prompt' }, updatedAt: now - 8_000 }),
+  session({ id: 'beta-new', cwd: betaDir, title: { text: 'beta newer', source: 'prompt' }, updatedAt: now }),
+  session({ id: 'needs-one', cwd: betaDir, title: { text: 'needs attention', source: 'prompt' }, updatedAt: now - 90_000 }),
+  session({ id: 'failed-one', title: { text: 'failed favorite', source: 'prompt' }, updatedAt: now - 10_000 }),
+]
+const favoriteIds = ['live-one', 'free-one', 'held-one', 'beta-old', 'beta-new', 'needs-one', 'failed-one', 'missing-pin']
+const favoriteStates = {
+  'needs-one': { status: 'needs-input' as const, live: true, current: false, summary: 'waiting for permission' },
+  'failed-one': { status: 'failed' as const, live: false, current: false, summary: 'failed task' },
+}
+console.log('Favorites: global rows, live state, recency, query and keyboard pinning')
+{
+  seedPins(favoriteIds)
+  const target = makeChannel({ registry, cwd: alphaDir, sessions: favoriteRows, states: favoriteStates })
+  const app = await mountSupervisor(target)
+  const shown = (): string => app.lines().join('\n')
+  await settle(() => shown().includes('free session'))
+  // The rail owns initial focus: Ctrl+P must not mutate the latent list cursor.
+  app.write('\u0010')
+  await queryBarrier(app, 'free')
+  check('Ctrl+P on the rail is a no-op', readSessionPins().has('live-one') && readSessionPins().size === favoriteIds.length)
+  app.write('\t')
+  check('Favorites sees pins from both cwd values and clears the query',
+    await settled(() => shown().includes(favoritesHeader) && shown().includes('beta newer') && shown().includes('live session')), shown())
+  check('unlisted pin ids invent no rows', !shown().includes('missing-pin'), shown())
+  const row = (title: string): number => app.lines().findIndex(line => line.includes(title))
+  check('live favorites sort before a newer offline row', row('live session') < row('beta newer') && row('needs attention') < row('beta newer'), shown())
+  check('offline favorites retain recency order', row('beta newer') < row('beta older'), shown())
+  check('current and failure states survive Favorites', shown().includes('current') && shown().includes('failed favorite'), shown())
+  const betaFacts = app.lines()[row('beta newer') + 1] ?? ''
+  check('cross-workspace row facts name its cwd', /Beta|beta/u.test(betaFacts), betaFacts)
+  await app.click('▢ Beta')
+  check('rail selection never scopes the global Favorites listing',
+    await settled(() => shown().includes(favoritesHeader) && shown().includes('live session') && shown().includes('beta newer')
+      && app.lines().some(line => line.includes('▣ Beta'))), shown())
+  await app.click('▢ Alpha')
+  await settle(() => app.lines().some(line => line.includes('▣ Alpha')))
+  app.write('\u001b[C')
+  await settle(() => hasFocus(app, 'live session'))
+  app.write('\u001b[A')
+  check('row zero remains the new-session card', await settled(() => hasFocus(app, 'New session')), shown())
+  app.write('\u0010')
+  await queryBarrier(app, 'beta')
+  check('Ctrl+P on card zero is a no-op', readSessionPins().size === favoriteIds.length)
+  check('existing query searches cwd across workspaces', await settled(() => shown().includes('beta newer') && !shown().includes('free session')), shown())
+  app.write('\u001b[Z')
+  await settle(() => shown().includes('Sessions in Alpha') && shown().includes('live session'))
+  app.write('\u001b[C')
+  await settle(() => hasFocus(app, 'live session'))
+  app.write('\u0010\u0010') // Both events arrive before React can publish new props.
+  await queryBarrier(app, 'free')
+  check('two Ctrl+P events in one batch cancel rather than using stale pins', readSessionPins().has('live-one'), shown())
+  check('pinning and tabs never open/create/stop a session', noSessionActions(app), app.calls.join(', '))
+  app.close()
+  const reopened = await mountSupervisor(target)
+  check('every mount starts on DSH, with persistent stars',
+    await settled(() => reopened.lines().join('\n').includes('Sessions in Alpha') && reopened.lines().some(line => line.includes('live session') && line.includes('★'))), reopened.lines().join('\n'))
+  reopened.write('\t')
+  check('reopened Favorites reads the same persisted pins', await settled(() => reopened.lines().join('\n').includes('beta newer')), reopened.lines().join('\n'))
+  reopened.close()
+}
+
+console.log('Favorites: DSH pin shares its star and Favorites row; Enter opens cross-cwd')
+{
+  seedPins([])
+  const app = await openSupervisor({ registry, cwd: alphaDir, sessions: favoriteRows })
+  const shown = (): string => app.lines().join('\n')
+  await settle(() => shown().includes('free session'))
+  app.write('\u001b[C')
+  await settle(() => hasFocus(app, 'live session'))
+  app.write('\u001b[B')
+  await settle(() => hasFocus(app, 'free session'))
+  app.write('\u0010')
+  check('Ctrl+P pins the real DSH row and paints the same star',
+    await settled(() => readSessionPins().has('free-one') && app.lines().some(line => line.includes('free session') && line.includes('★'))), shown())
+  check('pin alone neither opens nor creates', noSessionActions(app), app.calls.join(', '))
+  app.write('\t')
+  check('that same pin becomes a Favorites row', await settled(() => shown().includes(favoritesHeader) && shown().includes('free session')), shown())
+  await app.rightClick('free session')
+  await queryBarrier(app, 'free')
+  check('Favorites row context menu is disabled', !shown().includes('Remove from list') && !shown().includes('New session here'), shown())
+  app.write('\u001b[Z')
+  await settle(() => shown().includes('Sessions in Alpha'))
+  await app.rightClick('free session')
+  check('DSH row context menu remains available', await settled(() => shown().includes('Remove from list')), shown())
+  app.close()
+
+  seedPins(['beta-new'])
+  const cross = await openSupervisor({ registry, cwd: alphaDir, sessions: favoriteRows })
+  await settle(() => cross.lines().join('\n').includes('free session'))
+  cross.write('\t')
+  await settle(() => cross.lines().join('\n').includes('beta newer'))
+  cross.write('\u001b[C')
+  await settle(() => hasFocus(cross, 'New session'))
+  cross.write('\u001b[B')
+  check('down from card zero focuses the cross-cwd favorite', await settled(() => hasFocus(cross, 'beta newer')), cross.lines().join('\n'))
+  cross.write('\r')
+  check('Enter opens its real session id, without importing or creating',
+    await settled(() => cross.calls.includes('resumeTo:beta-new')) && !cross.calls.some(call => /^(import:|new:)/u.test(call)), cross.calls.join(', '))
+  cross.close()
+}
+
+console.log('Favorites: successful unpin reconciles focus, empty card still creates')
+{
+  seedPins(['live-one', 'free-one'])
+  const app = await openSupervisor({ registry, cwd: alphaDir })
+  const shown = (): string => app.lines().join('\n')
+  await settle(() => shown().includes('live session'))
+  app.write('\t')
+  await settle(() => shown().includes(favoritesHeader))
+  app.write('\u001b[C')
+  await settle(() => hasFocus(app, 'live session'))
+  app.write('\u0010')
+  check('unpin removes the focused row and selects the first remaining session',
+    await settled(() => !shown().includes('live session') && hasFocus(app, 'free session') && !readSessionPins().has('live-one')), shown())
+  app.write('\u0010')
+  check('unpinning the last favorite selects visible card zero',
+    await settled(() => !shown().includes('free session') && hasFocus(app, 'New session') && readSessionPins().size === 0), shown())
+  app.write('\u0010')
+  await queryBarrier(app, 'zzzz')
+  check('Ctrl+P with no favorite session remains a no-op', readSessionPins().size === 0 && noSessionActions(app), app.calls.join(', '))
   app.write('\r')
-  check(
-    'a second Enter opens the existing copy without creating another',
-    await settled(() => app.calls.filter(call => call === 'resumeTo:foreign-cc-2').length === 2, { timeoutMs: 4_000 })
-      && app.calls.includes('existing:foreign-cc-2')
-      && app.calls.filter(call => call === 'created:foreign-cc-2').length === 1,
-    app.calls.join(', '),
-  )
-
-  app.write('\t')
-  check(
-    'Tab moves to the next source',
-    await settled(() => shown().includes('Codex · sessions in Alpha')),
-    shown(),
-  )
-  check('switching source clears the query', shown().includes('codex refactor'), shown())
-  app.write('\u001b[Z')
-  check(
-    'Shift+Tab moves back',
-    await settled(() => shown().includes('Claude Code · sessions in Alpha') && shown().includes('fix the parser')),
-    shown(),
-  )
-  check('the query stays cleared on the way back', shown().includes('fix the parser') && shown().includes('write the docs'), shown())
-  check('a revisited source is listed afresh (nothing kept across tabs)', app.calls.filter(call => call === 'scan:claude-code').length === 2, app.calls.join(', '))
-  check('opening the screen probed the sources once', app.calls.filter(call => call === 'probe').length === 1, app.calls.join(', '))
-
-  await app.click('dsh-tui-supervisor-ghost')
-  check('clicking a rail group selects it', await settled(() => shown().includes('ghost chat')), shown())
-  const opened = app.calls.filter(call => call.startsWith('resumeTo')).length
-  await app.click('ghost chat')
-  check(
-    'a conversation whose directory is gone reports it',
-    await settled(() => shown().includes('working directory no longer exists'), { timeoutMs: 4_000 }),
-    shown(),
-  )
-  check(
-    'and opens nothing',
-    app.calls.filter(call => call.startsWith('resumeTo')).length === opened,
-    app.calls.join(', '),
-  )
-
-  app.write('\u001b[Z')
-  await settled(() => shown().includes('Sessions in Alpha'))
-  check('Shift+Tab from the first source returns to DSH', shown().includes('free session'), shown())
+  check('Enter on empty Favorites still starts a session in selected workspace', await settled(() => app.calls.includes(`new:${alphaDir}`)), app.calls.join(', '))
   app.close()
 }
 
-console.log('source tabs: a slow import respects where the user went meanwhile')
+console.log('Favorites: same-batch unpin and re-pin restore the focused session')
 {
-  // An import of a large conversation takes seconds. Closing the screen while
-  // it runs is the user saying "not now": the import may finish, but it must
-  // not pull the terminal into that session afterwards.
-  let release!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve })
-  const app = await openSupervisor({ registry, cwd: alphaDir, foreign: { ...foreignConfig, importGate: gate } })
+  seedPins(['free-one'])
+  const app = await openSupervisor({ registry, cwd: alphaDir })
   const shown = (): string => app.lines().join('\n')
-  await settled(() => (app.lines()[0] ?? '').includes('Claude Code'))
-  await app.click('Claude Code')
-  await settled(() => shown().includes('fix the parser'))
-  await app.click('fix the parser')
-  check(
-    'the import started and says so',
-    await settled(() => app.calls.includes('import:claude-code:cc-1') && shown().includes('Importing fix the parser')),
-    shown(),
-  )
-  app.close()
-  release()
-  await settled(() => app.calls.includes('created:foreign-cc-1'), { timeoutMs: 4_000 })
-  await sleep(150) // 固定窗:pacing 断言的是不该发生的打开，没有正向锚点可轮询
-  check(
-    'closing the screen before the import landed opens nothing',
-    !app.calls.some(call => call.startsWith('resumeTo')),
-    app.calls.join(', '),
-  )
-}
-{
-  // A notice belongs to the tab that asked: a failure landing after the user
-  // moved to another source must not show up under it.
-  let release!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve })
-  const app = await openSupervisor({ registry, cwd: alphaDir, foreign: { ...foreignConfig, importGate: gate } })
-  const shown = (): string => app.lines().join('\n')
-  await settled(() => (app.lines()[0] ?? '').includes('Claude Code'))
-  await app.click('Claude Code')
-  await app.click('dsh-tui-supervisor-ghost')
-  await settled(() => shown().includes('ghost chat'))
-  await app.click('ghost chat')
-  await settled(() => app.calls.includes('import:claude-code:cc-3'))
+  await settle(() => shown().includes('free session'))
   app.write('\t')
-  await settled(() => shown().includes('Codex · sessions in Alpha'))
-  release()
-  await sleep(200) // 固定窗:pacing 断言的是不该出现的提示，没有正向锚点可轮询
-  check(
-    'an import failure that lands on another tab stays off it',
-    shown().includes('codex refactor') && !shown().includes('working directory no longer exists'),
-    shown(),
-  )
+  await settle(() => shown().includes(favoritesHeader))
+  app.write('\u001b[C')
+  await settle(() => hasFocus(app, 'New session'))
+  app.write('\u001b[B')
+  await settle(() => hasFocus(app, 'free session'))
+  app.write('\u0010\u0010')
+  await queryBarrier(app, 'free')
+  check('Favorites double Ctrl+P restores pin AND focused real row, not card zero',
+    readSessionPins().has('free-one') && hasFocus(app, 'free session') && !hasFocus(app, 'New session'), shown())
+  check('same-batch pin toggles open/create nothing', noSessionActions(app), app.calls.join(', '))
+  app.write('\r')
+  check('Enter after same-batch re-pin opens the restored session rather than new',
+    await settled(() => app.calls.includes('resumeTo:free-one')) && !app.calls.some(call => call.startsWith('new:')), app.calls.join(', '))
   app.close()
 }
 
-console.log('source tabs: width degradation in the header')
+console.log('Favorites: persistence failure keeps row, star and focus')
 {
-  // Enough sources that the strip cannot fit next to the subtitle, and then
-  // not even on its own: the subtitle goes, then the tail folds into `+N`.
-  const many = Array.from({ length: 8 }, (_, index) => ({
-    agentId: `src-${index}`,
-    label: `Source Number ${index}`,
-  }))
+  seedPins(['free-one'])
+  const app = await openSupervisor({ registry, cwd: alphaDir })
+  const shown = (): string => app.lines().join('\n')
+  await settle(() => shown().includes('free session'))
+  app.write('\t')
+  await settle(() => shown().includes(favoritesHeader))
+  app.write('\u001b[C')
+  await settle(() => hasFocus(app, 'New session'))
+  app.write('\u001b[B')
+  await settle(() => hasFocus(app, 'free session'))
+  // Malformed external data is refused by the real atomic store, not silently
+  // replaced. The existing screen must retain its last successful pin state.
+  writeFileSync(pinFile, '{broken pins', 'utf8')
+  app.write('\u0010')
+  check('failed unpin reports failure without removing or unfocusing the row',
+    await settled(() => /Failed|Could not|Unable/u.test(shown()) && hasFocus(app, 'free session') && app.lines().some(line => line.includes('free session') && line.includes('★'))), shown())
+  check('failed unpin opens nothing', noSessionActions(app), app.calls.join(', '))
+  app.close()
+  writeFileSync(pinFile, '[]', 'utf8')
+}
+
+console.log('Favorites: occupied rows refuse Enter, background stop remains available')
+{
+  seedPins(['held-one', 'live-one', 'needs-one'])
+  const ledgerPath = join(fakeHome, '.dsh-tui', 'session-mounts.json')
+  writeFileSync(ledgerPath, JSON.stringify({ version: 1, owners: [{ pid: FOREIGN_PID, startedAt: now, sessionIds: ['held-one'] }] }), 'utf8')
+  const app = await openSupervisor({ registry, cwd: alphaDir, sessions: favoriteRows, states: favoriteStates })
+  const shown = (): string => app.lines().join('\n')
+  await settle(() => shown().includes('held session'))
+  app.write('\t')
+  await settle(() => shown().includes(favoritesHeader))
+  app.write('\u001b[C')
+  await settle(() => hasFocus(app, 'live session'))
+  app.write('\u0018')
+  check('current favorite cannot be stopped', await settled(() => shown().includes('cannot be stopped')) && !app.calls.includes('stop:live-one'), shown())
+  app.write('\u001b[B')
+  await settle(() => hasFocus(app, 'needs attention'))
+  app.write('\u001b[B')
+  await settle(() => hasFocus(app, 'held session'))
+  app.write('\r')
+  check('occupied favorite Enter reports occupancy and never opens',
+    await settled(() => shown().includes('held by pid') && shown().includes('another TUI terminal')) && !app.calls.some(call => call.startsWith('resumeTo:')), shown())
+  app.write('\u001b[A')
+  await settle(() => hasFocus(app, 'needs attention'))
+  app.write('\u0018')
+  check('Ctrl+X still routes the focused background favorite to stop', await settled(() => app.calls.includes('stop:needs-one')), app.calls.join(', '))
+  app.close()
+  writeFileSync(ledgerPath, JSON.stringify({ version: 1, owners: [] }), 'utf8')
+}
+
+console.log('Favorites: live state vocabulary survives the tab switch')
+for (const [status, glyph] of [
+  ['needs-input', '✻'], ['idle', '∙'], ['completed', '✓'], ['failed', '✕'], ['stopped', '∙'],
+] as const) {
+  const id = `state-${status}`
+  const title = `favorite ${status}`
+  seedPins([id])
   const app = await openSupervisor({
-    registry,
-    cwd: alphaDir,
-    foreign: {
-      sources: many,
-      rows: Object.fromEntries(many.map(source => [source.agentId, [foreignRow({ agentId: source.agentId, key: `${source.agentId}-row`, title: `row of ${source.label}` })]])),
-    },
+    registry, cwd: alphaDir,
+    sessions: [session({ id, title: { text: title, source: 'prompt' } })],
+    states: { [id]: { status, live: true, current: false, summary: '' } },
   })
-  const header = (): string => app.lines()[0] ?? ''
-  await settled(() => header().includes('Source Number 0'))
-  check('a crowded header drops the subtitle', !header().includes('switching does not stop them'), header())
-  const fold = /\+(\d+)/u.exec(header())
-  check('trailing tabs fold into +N', fold !== null && Number(fold[1]) > 0, header())
-  check('the last source is folded away', !header().includes('Source Number 7'), header())
-  await app.click(`+${fold?.[1] ?? ''}`)
-  check(
-    'clicking +N lists the folded tabs',
-    await settled(() => app.lines().join('\n').includes('Source Number 7')),
-    app.lines().join('\n'),
-  )
-  await app.click('Source Number 7')
-  check(
-    'picking a folded tab activates it, and it stays drawn',
-    await settled(() => app.lines().join('\n').includes('row of Source Number 7') && header().includes('Source Number 7')),
-    app.lines().join('\n'),
-  )
+  await settle(() => app.lines().join('\n').includes(title))
+  app.write('\t')
+  check(`Favorites preserves ${status} state glyph`,
+    await settled(() => app.lines().join('\n').includes(favoritesHeader) && app.lines().some(line => line.includes(title) && line.includes(glyph))), app.lines().join('\n'))
   app.close()
 }
+
+console.log('Favorites: modal and approval priority, narrow terminals')
+{
+  seedPins(['live-one'])
+  const app = await openSupervisor({ registry, cwd: alphaDir })
+  const shown = (): string => app.lines().join('\n')
+  await settle(() => shown().includes('Sessions in Alpha'))
+  app.write('\r')
+  await settle(() => shown().includes('Remove from list'))
+  app.write('\u001b[B\u001b[B\u001b[B\r')
+  await settle(() => shown().includes('Remove workspace'))
+  app.write('\u0010\t\u001b')
+  await settle(() => !shown().includes('Remove workspace'))
+  await queryBarrier(app, 'free')
+  check('workspace confirmation consumes pin/tab keys',
+    shown().includes('Sessions in Alpha') && !shown().includes(favoritesHeader) && readSessionPins().has('live-one')
+      && !app.calls.some(call => call.startsWith('removeWorkspace:')), shown())
+  app.close()
+}
+{
+  seedPins(['live-one'])
+  const app = await openSupervisor({ registry, cwd: alphaDir, approval: { key: 'favorite-approval', toolName: 'Bash', agentId: 'live-one', command: 'echo approval' } })
+  const shown = (): string => app.lines().join('\n')
+  await settle(() => shown().includes('echo approval'))
+  app.write('\u001b[C\u0010\t\u001b[Z')
+  await app.click('Favorites')
+  check('approval owns Tab, Shift+Tab, Ctrl+P and tab clicks',
+    await settled(() => shown().includes('Sessions in Alpha') && shown().includes('echo approval')) && readSessionPins().has('live-one') && !shown().includes(favoritesHeader), shown())
+  check('approval guards invoke no session actions', noSessionActions(app), app.calls.join(', '))
+  app.close()
+}
+for (const cols of [19, 40, 80]) {
+  seedPins(['free-one'])
+  const app = await openSupervisor({ registry, cwd: alphaDir, cols })
+  const flat = (): string => app.lines().join('').replace(/\s+/gu, '')
+  await settle(() => flat().includes('freesession'))
+  app.write('\t')
+  check(`${cols} cols: keyboard can reach Favorites`, await settled(() => flat().includes('Favorites')), app.lines().join('\n'))
+  if (cols >= 40) {
+    // Match the shortcut's instruction, not the tab strip's bare label; join
+    // wrapped rows so a narrow hint remains discoverable without layout locks.
+    check(`${cols} cols: Favorites hints expose Ctrl+P and Tab`,
+      await settled(() => flat().includes('Ctrl+P') && flat().includes('Tabswitchview')), app.lines().join('\n'))
+  }
+  app.write('\u001b[Z')
+  // Narrow headers truncate the workspace title; the unpinned live row is an
+  // unambiguous witness that DSH's full listing, not Favorites, is active.
+  check(`${cols} cols: keyboard returns to DSH`, await settled(() => app.lines().some(line => line.includes('live') && line.includes('☆'))), app.lines().join('\n'))
+  if (cols >= 40) check(`${cols} cols: DSH hints expose Ctrl+P and Tab`,
+    await settled(() => flat().includes('Ctrl+P') && flat().includes('Tabswitchview')), app.lines().join('\n'))
+  check(`${cols} cols: switching opens nothing`, noSessionActions(app), app.calls.join(', '))
+  app.close()
+}
+seedPins([])
 
 // ── the cache read re-scopes the in-memory slot on every mount ─────────────
 //
@@ -2059,11 +2259,13 @@ console.log('backend browser:')
     notify: () => {},
     subscribe: () => () => {},
   } as never
-  const target: StubChannel = { channel: backend, calls, plan: {}, landed: 0, config: { registry: [], cwd: alphaDir } }
+  const target: StubChannel = { channel: backend, calls, plan: {}, landed: 0, config: { registry: [], cwd: alphaDir, initialView: 'favorites' } }
   const app = await mountSupervisor(target)
   const text = (): string => app.lines().join('\n')
   check('the backend browser lists that backend\'s sessions', await settled(() => text().includes('claude current') && text().includes('claude two'), { timeoutMs: 4_000 }), text())
   check('… its one tab names the backend', text().includes('Claude Agent'))
+  check('a non-DSH backend ignores requested Favorites and keeps its single view',
+    /Sessions in alpha/iu.test(text()) && text().includes('claude one') && !text().includes(favoritesHeader), text())
   check('… it never reads the DSH workspace ledger or probes foreign sources', !calls.includes('registry') && !calls.includes('probe'), calls.join(' '))
   const line = (needle: string): string => app.lines().find(row => row.includes(needle)) ?? ''
   check('pins are the backend\'s own (the DSH pins file does not apply)', line('claude two').includes('★') && !line('claude one').includes('★'), `${line('claude two')} | ${line('claude one')}`)

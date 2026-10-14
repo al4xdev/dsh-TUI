@@ -112,6 +112,7 @@ import { collectMigratePickerRows, MIGRATE_SCAN_SPECS, parseImportSummary, resol
 import { collectActivitySamples, recentAgentsFrom, type ActivitySample } from '../dsh-adapter/migrate/recent-agents.js'
 import { MIGRATION_ADAPTERS } from '../dsh-adapter/migrate/index.js'
 import { SessionSupervisor } from './SessionSupervisor.js'
+import type { SessionSupervisorView } from './sessionSupervisor/model.js'
 import { SessionTree } from './SessionTree.js'
 import { Settings } from './Settings.js'
 import { WorkspacePicker } from '../components/WorkspacePicker.js'
@@ -750,9 +751,15 @@ export function Chat({
   // 整屏」，浏览器必须提前藏在下面；现在整屏（会话/设置/任务面板）盖在
   // 落地页**之上**、Esc 退回落地页，按需打开即可——boot 时同时为真反而会
   // 让浏览器盖住落地页（渲染顺序见各 early-return）。恢复重挂同样不开它。
-  const [supervisorOpen, setSupervisorOpen] = React.useState(
-    openHomeOnBoot === true && launchpadOnBoot !== true && !recoveryRemountOnBoot,
+  const [supervisorEntry, setSupervisorEntry] = React.useState<SessionSupervisorView | undefined>(
+    openHomeOnBoot === true && launchpadOnBoot !== true && !recoveryRemountOnBoot ? 'sessions' : undefined,
   )
+  const supervisorOpen = supervisorEntry !== undefined
+  // Keep the opening view with the screen state so ordinary routes cannot
+  // inherit a previous /bg tab. Nothing is remembered outside this opening.
+  const setSupervisorOpen = React.useCallback((open: boolean, initialView: SessionSupervisorView = 'sessions'): void => {
+    setSupervisorEntry(open ? initialView : undefined)
+  }, [])
   /**
    * The launchpad: the landing page every ordinary launch starts on.
    *
@@ -963,7 +970,7 @@ export function Chat({
   /** Open the supervisor from `/bg`, `/background`, or an empty-prompt ←.
    *  DSH backgrounds the attached session first and uses it as the Esc
    *  return target; other backends keep the current session attached. */
-  const backgroundToAgentView = React.useCallback((): void => {
+  const backgroundToAgentView = React.useCallback((initialView: SessionSupervisorView = 'sessions'): void => {
     // The non-DSH backends have a session catalog, but no live background
     // handoff. Open the shared session manager without pretending to park the
     // current turn. DSH keeps its existing handoff and Esc return target.
@@ -977,10 +984,10 @@ export function Chat({
       if (result.ok) {
         setAgentViewReturnId(result.backgroundedSessionId)
         agentViewOpenSessionRef.current = channel.agentId
-        setSupervisorOpen(true)
+        setSupervisorOpen(true, initialView)
       }
     })
-  }, [channel])
+  }, [channel, setSupervisorOpen])
   /** `/settings` opens the plugin settings screen (issue #165) — like the
    *  browser, a screen rather than a panel: it owns its own focus, staged
    *  drafts and keyboard; Chat only opens it. */
@@ -3047,7 +3054,7 @@ export function Chat({
         // DSH parks the attached session before opening the supervisor;
         // other backends open it over their still-attached session.
         setHelpOpen(false)
-        backgroundToAgentView()
+        backgroundToAgentView('favorites')
         return true
       }
       case 'workspace': {
@@ -5872,6 +5879,7 @@ export function Chat({
     const supervisorNode = (
       <SessionSupervisor
         channel={channel}
+        initialView={supervisorEntry}
         home={homeDir()}
         onClose={closeHome}
         approval={approvalSnapshot}

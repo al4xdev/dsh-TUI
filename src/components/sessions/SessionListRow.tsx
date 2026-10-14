@@ -68,6 +68,7 @@ export function SessionListRow({
   current,
   occupiedPid,
   spinner,
+  workspaceLabel,
 }: {
   session: SessionSummary
   /** Columns available to the row, indentation included. */
@@ -75,10 +76,12 @@ export function SessionListRow({
   /** 0 for a conversation, 1 for a sub-agent run under its parent. */
   depth: number
   focused: boolean
-  /** Whether the user pinned this session to the top of the browser. */
+  /** Whether the user selected this session as a favorite. */
   pinned: boolean
   /** Epoch ms used for every relative time in this render pass. */
   now: number
+  /** Compact project context for a list that spans more than one workspace. */
+  workspaceLabel?: string
   /** 鼠标点击行（fullscreen）：恢复该会话（与 Enter 同路径）。 */
   onClick?(event: ClickEvent): void
   /** 鼠标右键（fullscreen）：在该行弹出操作菜单（打开/固定/重命名/删除）。 */
@@ -144,6 +147,10 @@ export function SessionListRow({
   })
 
   const facts: string[] = [formatWhen(session.updatedAt, now)]
+  if (workspaceLabel !== undefined) {
+    // Keep project context visible without spending the entire facts line on it.
+    facts.unshift(truncateWidth(workspaceLabel, Math.max(4, Math.floor(body / 2))))
+  }
   if (session.branch !== undefined) facts.push(session.branch)
   const size = formatBytes(session.bytes)
   if (size !== undefined) facts.push(size)

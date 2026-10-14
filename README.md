@@ -239,7 +239,7 @@ dsh-tui migrate codex --dry-run  # preview what would land, write nothing
 - **Read-only source**: migration only reads the foreign agent's local store; artifacts are written through the official `JsonlSessionPersistence` backend, so imported sessions are first-class (openable, continuable).
 - **Idempotent**: one deterministic UUID per source conversation — re-importing skips what is already present instead of stacking duplicates.
 - **Structure preserved**: user/assistant messages, reasoning traces, tool calls with their results, and the source's context compactions (as native compaction checkpoints) are rebuilt turn by turn; harness-injected machine text opens no turn. An imported session can pick the work straight up.
-In-TUI browsing: the session screen (`/resume`) shows a tab per agent that has conversations; picking one imports just that conversation and opens it.
+The session manager does not browse or import external sources in this fork; its DSH tabs are `DSH` and `Favorites`.
 In-TUI: `/migrate` (optionally `/migrate <agent> [--dry-run]`) runs the same import in a child process and reports through the notification flow.
 CLI alternative: `dsh-tui migrate ...` from any shell runs the same import.
 Full guide: [Session migration](docs/migrate.en.md).
@@ -361,6 +361,10 @@ Full reference: [Interaction and commands](docs/interaction.en.md).
 
 `/resume` · `/home` · `/agentview` · `/bg` · `⌸` open the same session manager: workspace rail, live state, filter, ★ pins. Also `/model` `/new` `/compact` `/export` `/btw` `/tree` `/fork` `/rewind` `/settings` `/setup` `/status` `/cost` `/jobs` `/skills` `/mcp` `/provider` `/auth` `/login` `/update`.
 
+On DSH, `Ctrl+P` favorites/unfavorites the selected session in the **list pane** (not the rail or New session card). `Tab`/`Shift+Tab` switch `DSH` ↔ `Favorites`: Favorites includes marked sessions from **all workspaces in the channel's DSH catalog**, with abbreviated working directories in the facts row for TTY use. Both views keep the existing live-first, then recent-first order; favorites do not get sorting priority. The rail, New session card, filter, arrows and `Enter` keep their existing actions; the selected rail workspace still determines where a new session starts. An empty Favorites list says to select a session in DSH and press `Ctrl+P`.
+
+On DSH, `/bg` and `/background` open `Favorites` after the background handoff succeeds; `/resume`, `/home`, `/agentview`, the sessions button and `←` on an empty prompt start on `DSH`. The cursor starts on the first visible favorite in the list pane (or the New session card when empty), not the workspace rail. No tab preference is remembered, and `/bg` does not automatically favorite a session. Empty Favorites keeps the existing message and New session card; `Esc` keeps its usual return behavior. Favoriting and switching views never open, start or stop a session. Other kernels remain supported and their managers retain a single view without these global favorites. In Chat, `Ctrl+P` still toggles the loaded-context panel when it is on screen.
+
 In `/provider`'s model list, focus a model and press `Tab` to edit its context window, max output tokens, reasoning efforts, and image input capability.
 
 The session manager paints the last successful list immediately while it checks the persistence store for changes. Titles that require a deeper log scan appear first with a fallback name and update in place when recovery finishes.
@@ -369,7 +373,7 @@ History-only directories offer edit and new-session actions; rename and remove a
 
 **Background jobs**: card headers open the focused task panel. Click the card body or use `Ctrl+O` to toggle the command between its first statement and full script. Commands and output use separate colored edges with `❯` (`>` on Windows) and `≡` on their first rows; output always stays at the latest two visible rows. `/jobs` and the side panel keep the full output scrollable, while `e` toggles the focused command. Consecutive blank script lines collapse to one.
 
-**Background sessions**: On the DSH backend, `/bg` or `←` on an empty prompt backgrounds the current session and opens the session manager; `Esc` returns to it. Background sessions run in this process and stop when the TUI exits. Logs survive. On Claude/Codex, those entries open the session manager without backgrounding the session.
+**Background sessions**: On the DSH backend, `/bg` (alias `/background`) backgrounds the current session and opens the session manager on Favorites after a successful handoff; `←` on an empty prompt uses the same background flow but opens DSH. `Esc` returns as before. Background sessions run in this process and stop when the TUI exits. Logs survive. On Claude/Codex, those entries open the single-view session manager without backgrounding the session.
 
 Full commands: [Interaction and commands](docs/interaction.en.md).
 

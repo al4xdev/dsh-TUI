@@ -17,6 +17,9 @@
  * contract, the pin STAR input path (the affordance still exists), and the two
  * ends of entering a session (the pane's own rows, and the failure path that
  * must not be misreported).
+ * `/bg` and `/background` additionally exercise Chat's live handoff routing:
+ * successful DSH handoffs enter Favorites, while normal entries and an empty
+ * composer Left arrow enter Sessions. A refused handoff never opens a screen.
  *
  * What is NO LONGER asserted here, and why (delete, do not resurrect):
  *   - session-level right-click menu, rename and delete: no such affordance on
@@ -52,6 +55,7 @@ import instances from '../lib/types/ink/instances.js'
 import { settle, settled, sleep } from './lib/term-test.mjs'
 
 const { Terminal } = xtermPkg
+setLang('en')
 
 let failed = 0
 function check(name, ok, extra = '') {
@@ -330,8 +334,6 @@ const screen = () => {
     (buf.getLine(buf.baseY + y)?.translateToString(true) ?? '').replace(/\s+$/, ''))
     .join('\n')
 }
-
-setLang('en')
 
 // Startup settles once the composer prompt is up and can take input.
 await settle(() => screen().includes('❯'))
@@ -656,6 +658,113 @@ writeSessionPins([])
   check('and the transcript is back with it', /❯/.test(screen5()), flat(screen5()).slice(0, 200))
   app5.unmount()
 }
+
+// ── /bg entry routing owns a view, not a sticky browser preference ──────────
+async function mountBackgroundChat({ backgroundOk = true } = {}) {
+  const { stdout: out, stderr: err, stdin: input } = makeStreams()
+  const target = makeChannel()
+  // Chat routes slash commands through the host's advertised registry; the
+  // legacy browser fixture only advertises /resume and would submit /bg as text.
+  target.commandList = ['resume', 'home', 'agentview', 'bg', 'background'].map(name => ({ name, description: name }))
+  const composerRef = { current: null }
+  const handoffs = []
+  target.backgroundCurrent = async () => {
+    handoffs.push(target.agentId)
+    if (!backgroundOk) return { ok: false }
+    const backgroundedSessionId = target.agentId
+    target.agentId = 'foreground-after-background'
+    target.emit()
+    return { ok: true, backgroundedSessionId }
+  }
+  target.newSession = async () => { target.calls.workspace.push('new-session'); return false }
+  target.resumeTo = async (id) => {
+    target.calls.resume.push(id)
+    target.agentId = id
+    target.emit()
+    return { ok: true }
+  }
+  const app = await render(React.createElement(Chat, {
+    channel: target,
+    promptControllerRef: composerRef,
+    questionStore: { subscribe: () => () => {}, getSnapshot: () => null, answerCurrent: () => {} },
+    onExit() {},
+  }), { stdout: out, stderr: err, stdin: input, exitOnCtrlC: false, patchConsole: false })
+  for (const value of instances.values()) instances.set(process.stdout, value)
+  const shown = () => {
+    const buffer = out.term.buffer.active
+    return Array.from({ length: out.term.rows }, (_, y) =>
+      buffer.getLine(buffer.baseY + y)?.translateToString(true) ?? '').join('\n')
+  }
+  await settle(() => composerRef.current !== null)
+  return {
+    target, composerRef, handoffs, shown,
+    write: (data) => input.write(data),
+    command: async (name) => {
+      await settle(() => composerRef.current !== null)
+      input.write(`/${name}`)
+      check(`/${name} reaches the real composer`,
+        await settled(() => composerRef.current?.text?.() === `/${name}`), String(composerRef.current?.text?.()))
+      input.write('\r')
+    },
+    close: () => { app.unmount(); instances.delete(process.stdout) },
+  }
+}
+
+for (const command of ['bg', 'background']) {
+  check('background entry fixture seeds a cross-workspace favorite', writeSessionPins(['s-foreign']))
+  const app = await mountBackgroundChat()
+  await app.command(command)
+  check(`/${command} opens Favorites after the DSH handoff`,
+    await settled(() => app.shown().includes('Favorites · all workspaces') && app.shown().includes('delta other workspace')), flat(app.shown()).slice(0, 260))
+  check(`/${command} backgrounds exactly the attached session`,
+    app.handoffs.join(',') === 'live-session' && app.target.agentId === 'foreground-after-background', JSON.stringify(app.handoffs))
+  check(`/${command} opens a supervisor rather than leaving the composer mounted`, app.composerRef.current === null)
+  check(`/${command} never creates, mounts or changes workspace just to open Favorites`,
+    app.target.calls.resume.length === 0 && app.target.calls.workspace.length === 0, JSON.stringify(app.target.calls))
+
+  app.write('\u001b')
+  check(`Esc from /${command} restores the composer and its original session`,
+    await settled(() => app.composerRef.current !== null && app.target.agentId === 'live-session'
+      && !app.shown().includes('Favorites · all workspaces')), JSON.stringify(app.target.calls.resume))
+  check(`/${command} keeps the existing handoff return target`, app.target.calls.resume.join(',') === 'live-session')
+
+  // These commands must not inherit the entry view of the previous mount.
+  for (const normalEntry of ['resume', 'home', 'agentview']) {
+    await app.command(normalEntry)
+    check(`/${normalEntry} after /${command} opens normal Sessions`,
+      await settled(() => app.shown().includes('Sessions in tmp') && app.shown().includes('gamma')
+        && !app.shown().includes('delta other workspace')), flat(app.shown()).slice(0, 240))
+    app.write('\u001b')
+    await settle(() => app.composerRef.current !== null)
+  }
+  check('normal entry commands do not background again', app.handoffs.length === 1, JSON.stringify(app.handoffs))
+  await settle(() => app.composerRef.current?.text?.() === '')
+  app.write('\u001b[D')
+  check(`empty composer Left after /${command} uses normal Sessions`,
+    await settled(() => app.shown().includes('Sessions in tmp') && app.shown().includes('gamma')
+      && !app.shown().includes('delta other workspace')), flat(app.shown()).slice(0, 240))
+  check('empty composer Left preserves the background handoff', app.handoffs.length === 2, JSON.stringify(app.handoffs))
+  app.write('\u001b')
+  check('Esc from Left restores the original session again',
+    await settled(() => app.composerRef.current !== null && app.target.agentId === 'live-session'), JSON.stringify(app.target.calls.resume))
+  app.close()
+}
+
+for (const command of ['bg', 'background']) {
+  const app = await mountBackgroundChat({ backgroundOk: false })
+  await app.command(command)
+  await settle(() => app.handoffs.length === 1 && app.composerRef.current?.text?.() === '')
+  // A subsequent editable draft is the positive barrier: merely observing an
+  // already-present composer would not prove the rejected async route settled.
+  app.write('still here')
+  check(`/${command} refuses a failed handoff without opening either view`,
+    await settled(() => app.composerRef.current?.text?.() === 'still here')
+      && !app.shown().includes('Favorites · all workspaces') && !app.shown().includes('Sessions in tmp'), flat(app.shown()).slice(0, 260))
+  check(`failed /${command} keeps the original session and invokes no mount`,
+    app.handoffs.length === 1 && app.target.agentId === 'live-session' && app.target.calls.resume.length === 0, JSON.stringify(app.target.calls))
+  app.close()
+}
+writeSessionPins([])
 
 if (failed > 0) {
   console.error(`\n${failed} check(s) failed`)

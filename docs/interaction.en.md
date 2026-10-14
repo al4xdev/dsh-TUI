@@ -20,7 +20,7 @@
 | `Ctrl+Z` | Undo the prompt draft's last word-level edit (text, caret and images together). Draft-only: a submit, a history recall (`Ctrl+R`/`↑`) or a session switch ends the history; it is NOT the message/conversation rewind behind `Esc Esc`. Remappable via `/settings` |
 | `Esc` / `Ctrl+C` / `Enter` while an image preview is open | Close the preview and restore the surface underneath; other keys are not passed through |
 | `Left` / `Right` in the image modal | Previous / next image, no wrapping; caret peeks keep arrows with the prompt |
-| `←` (empty input) | Open the session manager (same as `/bg`); DSH backgrounds the current session first, while Claude/Codex keep it attached |
+| `←` (empty input) | Open the session manager on DSH (unlike `/bg`, which opens Favorites); DSH backgrounds the current session first, while Claude/Codex keep it attached in their single view |
 | `Ctrl+C` | Interrupt while working; press again while the interrupt is still settling to force-exit<br>clear non-empty idle input; **while idle with a selection in the prompt input, copy it to the clipboard (selection kept for editing)**; press twice on empty input to exit |
 | `Ctrl+D` | Same ladder as `Ctrl+C`: interrupt while working (press again to force-exit if the interrupt stalls); press twice while idle to exit |
 | `Ctrl+O` | Toggle transcript/verbose detail, including full reasoning and tool arguments/output; also the escape hatch for the **long-line fold** (a single line over 1000 chars is clipped to 1000 with a `… N chars folded` marker — see the user guide §5). Clicking the folded row (or the tool card face) toggles it too |
@@ -352,25 +352,27 @@ brings it back.
 | --- | --- |
 | `←` `→` | Choose the column that owns the keyboard (rail / sessions); exactly one `❯` is on screen |
 | `↑` `↓` / `PgUp` `PgDn` / wheel | Move in the rail; move in the session list (row 0 is the new-session card) |
-| Type | Filter the selected workspace's sessions live (title, directory, branch, model) |
+| Type | Filter the current view's sessions live (title, directory, branch, model) |
 | `Enter` | Sessions: enter the row under the cursor (row 0 = start a session in this workspace). Rail: open that workspace's action menu |
 | `Ctrl+Enter` | Start a session in the workspace under the cursor (either column) |
 | `Ctrl+N` | Start a session in the workspace under the cursor |
 | `Ctrl+X` | Stop the **background** session under the cursor (the attached one cannot be stopped) |
 | `Ctrl+L` | Re-read the workspace registry and the session listing |
-| `Tab` / `Shift+Tab` | Next / previous source tab (when other agents have sessions) |
+| `Ctrl+P` | DSH only: favorite/unfavorite the selected session in the list pane; no-op on the rail, new-session card or an empty list |
+| `Tab` / `Shift+Tab` | DSH only: switch `DSH` ↔ `Favorites` |
 | `Esc` | Dismiss a notice → clear the filter → leave the screen |
 
-The right side of the title row is the **source strip**: `DSH │ Claude Code  Codex …`.
+On DSH, the title row has two **view tabs**: `DSH │ Favorites`, even when no favorites exist.
 
-- A tab appears only for another coding agent on this machine (Claude Code, Codex, Grok Build, zcode) that has conversations, in a fixed order; with none, there is no strip. Opening the screen only checks whether each source has any conversation; a source's list is read when its tab is opened.
-- The screen always opens on `DSH`; click a tab or press `Tab` / `Shift+Tab` to switch, which clears the filter.
+- On DSH, `/bg` and `/background` open `Favorites` after the background handoff succeeds. `/resume`, `/home`, `/agentview`, the sessions button and `←` on an empty prompt start on `DSH`, listing the selected workspace. No tab preference is remembered; `/bg` does not automatically favorite a session. Empty Favorites keeps the existing message and New session card, and `Esc` returns as before.
+- Click a tab or press `Tab` / `Shift+Tab` to switch; the existing filter, notice and menu reset applies.
 - On a narrow terminal the subtitle goes first, then trailing tabs fold into `+N` (click it for the rest); the active tab never folds.
-- A source tab has the same two columns: the rail groups conversations by working directory (a registered directory keeps its workspace name; conversations with no recorded directory share an "Unknown directory" group), and the list shows that directory's conversations, filtered live by title and directory.
-- There is no new-session card; `Enter` or a click **imports and opens** — just that one conversation is written into the DSH session store and entered. A conversation imported before opens directly, without a second copy.
-- If the conversation's working directory no longer exists, nothing is imported and the notice line says so.
-- On a source tab `Ctrl+N`, `Ctrl+X` and pins do nothing; `Ctrl+L` rescans the source.
-- The import uses the same parsing and deterministic ids as `/migrate`, so both entries land a conversation on the same DSH session.
+- **Favorites · all workspaces** lists marked, eligible sessions from every workspace in this channel's DSH catalog, including history-only directories. Selecting a rail workspace does not filter Favorites.
+- Rows keep the existing live states, current/occupied markers and spinner. Favorites adds an abbreviated working directory to the facts row, readable in a TTY without hover. Both views keep live-first, then recent-first sorting; a favorite is not moved ahead merely because it is marked.
+- The rail and New session card remain; the card and `Ctrl+N` still create in the selected rail workspace. Arrows, `Enter`, the existing filter and background actions are unchanged. `Enter` on a favorite resumes that session by ID, not the rail workspace.
+- Empty Favorites explicitly says: select a session in DSH and press `Ctrl+P`. Loading and no filter matches keep their own messages.
+- Favoriting and switching views never start, stop or open a session. In Chat, `Ctrl+P` retains its loaded-context action.
+- This screen no longer probes, browses or imports external sources. `/migrate` and `dsh-tui migrate` remain available, and other kernels retain their supported single-view session managers without these global favorites.
 
 The rail's menu has four entries:
 
@@ -386,7 +388,7 @@ source as the status bar's "needs input" hint: working / needs input / idle / co
 failed / stopped, and the session this terminal is attached to is marked `current`.
 
 - Clicking a row enters that session (same as `Enter`).
-- Clicking the in-row `★`/`☆` toggles the pin only (persisted in `~/.dsh-tui/session-pins.json`) and never enters the session.
+- On DSH, clicking the in-row `★`/`☆` or pressing `Ctrl+P` on a selected list session toggles the same favorite (persisted in `~/.dsh-tui/session-pins.json`) and never enters the session.
 
 A session held by **another** TUI terminal is still listed, but the row turns red, ends
 with `held by pid <pid>`, and **cannot be clicked**: two processes driving one append-only
@@ -406,24 +408,24 @@ those sessions as usual — "no registration" is not "no history".
 **Behaviour changes versus the old screens** (deliberately removed, and no longer covered by regressions):
 
 - Session-level right-click menu (rename/delete one session).
-- `Ctrl+P` pin shortcut.
 - `Ctrl+S` to reveal delegated runs.
 - `Ctrl+A` this-project/all-projects.
 - `Ctrl+B` branch filter.
 - `Tab` preview, `Ctrl+R` rename, `Ctrl+D` delete, `Ctrl+X` clearing empty sessions.
-- Pinning is still reachable by clicking the row's `★`.
+- Favorites are reachable by clicking the row's `★` or using `Ctrl+P` in the DSH list pane.
 - Not returned to the new screen: dispatching a background session and replying to one,
   the `Space` peek panel, and `Shift+Enter` dispatch-and-attach. After `/bg`, reach a
-  background session by pressing `Enter` on it in the workspace list.
+  background session by pressing `Enter` on it in Favorites if marked, or switching to DSH to find it in its workspace list.
 
 On Windows, `dsh-tui.cmd --resume` uses the session ID last written to `~/.dsh-tui/resume.txt`.
 
 ### Background sessions
 
 On DSH, `/bg` (alias `/background`) moves the current session to the background and keeps it
-running, switches the terminal to a fresh session, and opens the session-management screen;
-`←` on an empty prompt does the same. On Claude/Codex, both entries open the session manager
-without backgrounding the attached session.
+running, switches the terminal to a fresh session, and opens Favorites after the handoff succeeds.
+`←` on an empty prompt uses the same background flow but opens the DSH view. Neither entry
+automatically favorites a session, and `Esc` returns as before. On Claude/Codex, these entries
+open the single-view session manager without backgrounding the attached session.
 
 - While a background session waits on you, the prompt footer shows `← N agents`.
 - A background session awaiting approval shows as **needs input**, and the approval panel labels which session it comes from.
@@ -753,7 +755,7 @@ The command menu merges local commands with the DSH command registry. Type `/` t
 **Sessions**
 
 - `/new`, `/resume`, `/home`, `/agentview` — all three open the same session-management screen.
-- `/bg` — alias `/background`, opens the session manager; DSH backgrounds the session first, while Claude/Codex keep it attached.
+- `/bg` — alias `/background`, opens Favorites on DSH after the background handoff succeeds; Claude/Codex keep the session attached and open their single-view manager.
 - `/rename`.
 - `/recap` — session recap: apply the suggested title in one key; `/settings` can enable an
   auto-summary on session open, on by default — a divider + `Recap:` line appears at the
