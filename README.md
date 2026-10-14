@@ -593,6 +593,8 @@ PID reuse across platforms.
 
 **Background sessions**: On the DSH backend, `/bg` or `←` on an empty prompt backgrounds the current session and opens the session manager; `Esc` returns to it. Background sessions run in this process and stop when the TUI exits. Logs survive. On Claude/Codex, those entries open the session manager without backgrounding the session.
 
+On DSH, questionnaires from sessions whose background handles belong to this TUI remain answerable after `/bg`. The existing question panel can interrupt the session manager, and a pending question survives returning to its session. Other terminals' agents are not claimed.
+
 Full commands: [Interaction and commands](docs/interaction.en.md).
 
 ## Configuration & Extensions

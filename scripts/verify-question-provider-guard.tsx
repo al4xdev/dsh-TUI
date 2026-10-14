@@ -31,13 +31,15 @@ const [
   { scopeTarget },
   { default: UserQuestionService },
   guard,
-  { prepareQuestionAnswerer },
+  { prepareQuestionAnswerer, bindHostedQuestionAgents },
+  { QuestionStore },
 ] = await Promise.all([
   import('@deepseek-ai/cordis'),
   import('@deepseek-ai/dsh-scope'),
   import('@deepseek-ai/dsh-user-questions'),
   import('../src/dsh-adapter/providerGuard.js'),
   import('../src/dsh-adapter/questions-answerer.js'),
+  import('../src/dsh-adapter/questions.js'),
 ])
 
 const {
@@ -201,6 +203,7 @@ const disposeAnswerer = waterfallRegistration.register(owner)
 interface QuestionRequest {
   questions: Array<{ id: string; question: string }>
   agent?: { id: string }
+  signal?: AbortSignal
 }
 
 interface QuestionAnswer {
@@ -276,6 +279,55 @@ assert.equal(
 )
 assert.deepEqual(claimedByTui, ['agent-current', undefined, 'agent-other'])
 
+// /bg keeps A's handle while the same channel switches its foreground to B.
+const backgroundHandles = new Map<string, object>()
+let ownershipChecks = 0
+const releaseHostedAgents = bindHostedQuestionAgents(owner, id => {
+  ownershipChecks += 1
+  return backgroundHandles.has(id)
+})
+owner.agentId = currentAgent.id
+backgroundHandles.set(currentAgent.id, {})
+owner.agentId = otherAgent.id
+assert.equal(
+  await dispatchQuestion(scopeTarget(currentAgent, currentAgent), 'user-questions/request',
+    { questions: [question], agent: currentAgent }, next),
+  tuiAnswer,
+  'a background agent owned before /bg must stay answerable after foreground changes',
+)
+
+const visibleForeignAgent = { id: 'agent-visible-foreign' }
+const rosterOwner = Object.assign(owner, { agentViewRows: () => [visibleForeignAgent] })
+assert.equal(rosterOwner.agentViewRows()[0], visibleForeignAgent)
+assert.equal(
+  await dispatchQuestion(scopeTarget(visibleForeignAgent, visibleForeignAgent), 'user-questions/request',
+    { questions: [question], agent: visibleForeignAgent }, next),
+  downstreamAnswer,
+  'a process-visible agent outside the owned handle map must still delegate',
+)
+
+for (const lifecycle of ['withdrawn', 'stopped', 'disposed']) {
+  backgroundHandles.set(currentAgent.id, {})
+  backgroundHandles.delete(currentAgent.id)
+  assert.equal(
+    await dispatchQuestion(scopeTarget(currentAgent, currentAgent), 'user-questions/request',
+      { questions: [question], agent: currentAgent }, next),
+    downstreamAnswer,
+    `${lifecycle} background ownership must not survive handle removal`,
+  )
+}
+
+backgroundHandles.set(currentAgent.id, {})
+releaseHostedAgents()
+const checksAfterRelease = ownershipChecks
+assert.equal(
+  await dispatchQuestion(scopeTarget(currentAgent, currentAgent), 'user-questions/request',
+    { questions: [question], agent: currentAgent }, next),
+  downstreamAnswer,
+  'disposing the hosted-agent binding must revoke ownership even with a retained handle',
+)
+assert.equal(ownershipChecks, checksAfterRelease, 'a released ownership callback must not run again')
+
 disposeAnswerer()
 assert.equal(
   await dispatchQuestion(
@@ -287,6 +339,84 @@ assert.equal(
   downstreamAnswer,
   'disposing the listener must restore waterfall fallthrough',
 )
+
+// Use the real UI store: a background ask must remain pending, not fail as
+// unhandled or get replaced when the foreground changes back to its owner.
+const storeCtx = new Context()
+const store = new QuestionStore()
+const storeOwner = { agentId: 'store-agent-a' }
+const storeAgentA = { id: storeOwner.agentId }
+const storeAgentB = { id: 'store-agent-b' }
+const storeHandles = new Map<string, object>()
+storeCtx.effect(() => bindHostedQuestionAgents(storeOwner, id => storeHandles.has(id)))
+const storeRegistration = prepareQuestionAnswerer(storeCtx, {}, store)
+if (storeRegistration.kind !== 'waterfall') throw new Error('expected store waterfall registration')
+storeCtx.effect(() => storeRegistration.register(storeOwner))
+storeCtx.effect(() => () => store.rejectAll())
+const dispatchStoredQuestion = storeCtx.waterfall.bind(storeCtx) as typeof dispatchQuestion
+storeHandles.set(storeAgentA.id, {})
+storeOwner.agentId = storeAgentB.id
+
+let settled = false
+const pending = dispatchStoredQuestion(scopeTarget(storeAgentA, storeAgentA), 'user-questions/request', {
+  questions: [{ id: 'background-return', question: 'Did this question survive /bg?' }],
+  agent: storeAgentA,
+}, next)
+void pending.then(() => { settled = true }, () => { settled = true })
+await Promise.resolve()
+await Promise.resolve()
+assert.equal(settled, false, 'the background ask must wait for a user answer rather than terminate')
+const backgroundSnapshot = store.getSnapshot()
+assert.equal(backgroundSnapshot?.question.id, 'background-return', 'the shared UI queue must expose the background question')
+storeOwner.agentId = storeAgentA.id
+assert.equal(store.getSnapshot(), backgroundSnapshot, 'returning to A must preserve the pending question and draft identity')
+store.answerCurrent({ selected: ['Yes, it survived'] })
+assert.deepEqual(await pending, { answers: [{ id: 'background-return', selected: ['Yes, it survived'] }] })
+assert.equal(store.getSnapshot(), null, 'answering must drain the real question store')
+
+storeOwner.agentId = storeAgentB.id
+const abort = new AbortController()
+const abortedAsk = dispatchStoredQuestion(scopeTarget(storeAgentA, storeAgentA), 'user-questions/request', {
+  questions: [{ id: 'background-abort', question: 'Abort this background ask' }],
+  agent: storeAgentA,
+  signal: abort.signal,
+}, next)
+assert.equal(store.getSnapshot()?.question.id, 'background-abort')
+const aborted = assert.rejects(abortedAsk, { code: 'ASK_ABORTED' })
+abort.abort()
+await aborted
+assert.equal(store.getSnapshot(), null, 'aborting a hosted ask must clear its UI queue entry')
+
+const teardownAsk = dispatchStoredQuestion(scopeTarget(storeAgentA, storeAgentA), 'user-questions/request', {
+  questions: [{ id: 'background-teardown', question: 'Dispose this question fiber' }],
+  agent: storeAgentA,
+}, next)
+assert.equal(store.getSnapshot()?.question.id, 'background-teardown')
+const tornDown = assert.rejects(teardownAsk, { code: 'ASK_ABORTED' })
+await storeCtx.fiber.dispose()
+await tornDown
+assert.equal(store.getSnapshot(), null, 'fiber teardown must reject and clear pending background questions')
+assert.equal(
+  await dispatchStoredQuestion(scopeTarget(storeAgentA, storeAgentA), 'user-questions/request',
+    { questions: [question], agent: storeAgentA }, next),
+  downstreamAnswer,
+  'fiber teardown must remove its waterfall listener',
+)
+
+// A new listener with the same owner must not inherit the disposed fiber's
+// WeakMap predicate, even while this fixture deliberately retains its handle.
+const replacementCtx = new Context()
+const replacement = prepareQuestionAnswerer(replacementCtx, {}, { ask: async () => tuiAnswer })
+if (replacement.kind !== 'waterfall') throw new Error('expected replacement waterfall registration')
+replacement.register(storeOwner)
+const dispatchReplacement = replacementCtx.waterfall.bind(replacementCtx) as typeof dispatchQuestion
+assert.equal(
+  await dispatchReplacement(scopeTarget(storeAgentA, storeAgentA), 'user-questions/request',
+    { questions: [question], agent: storeAgentA }, next),
+  downstreamAnswer,
+  'fiber disposal must revoke the hosted predicate as well as its listener',
+)
+await replacementCtx.fiber.dispose()
 
 for (const serviceContext of serviceContexts) await serviceContext.fiber.dispose()
 await waterfallCtx.fiber.dispose()
