@@ -49,7 +49,7 @@ import { armFirstFrameAck, beginHandoffAck, handoffAttemptId, ownsAltScreenExit 
 import { KERNEL_IDS, KERNEL_SWITCH_HANDOFF_ENV, kernelDisplayName, readKernelPrefs, resolveRememberedBackend, writeKernelPrefs, type KernelBackendId } from '../kernelPrefs.js'
 import { shouldOfferOnboarding } from '../onboardingPrefs.js'
 import { resolveSessionCwd } from '../utils/workspaceRoot.js'
-import { beginRestartAttempt, checkForTuiUpdate, installedTuiVersion, isBootDeadlockTarget, isStandaloneRuntime, isVersionNewer, logRestartEvent, resolveDshProfileName, resolveTuiUpdateTarget, restartTui, updateTuiAndRestart, writeHandoffNotice, writeLastRunRecord, type TuiRestartOptions } from '../update.js'
+import { beginRestartAttempt, installedTuiVersion, isBootDeadlockTarget, isStandaloneRuntime, isVersionNewer, logRestartEvent, resolveDshProfileName, resolveTuiUpdateTarget, restartTui, updateTuiAndRestart, writeHandoffNotice, writeLastRunRecord, type TuiRestartOptions } from '../update.js'
 import { getLang, isLang, resolveStartupLang, setLang, t, writeLangPref } from '../i18n.js'
 import { applyBtwContextBudget, applyBtwContextTurns, applyCodeFrameStyle, applyCompanionSkin, applyImageBacking, applyMathImageBacking, applyMathImageScale, applyMathRendering, applyMermaidDiagrams, applyPageMargin, applySidePanelOpen, applySidePanelPanels, applySidePanelRatio, applySidePanelSplitEnabled, BTW_CONTEXT_BUDGET_MAX, BTW_CONTEXT_BUDGET_MIN, BTW_CONTEXT_TURNS_MAX, BTW_CONTEXT_TURNS_MIN, DEFAULT_PAGE_MARGIN, DEFAULT_SIDE_PANEL_IDS, DEFAULT_STATUS_BAR, isPageMarginMode, normalizeJobGroupFold, normalizePageMargin, normalizeScrollGutter, normalizeSidePanelPanels, normalizeSidePanelRatio, normalizeStatusBar, normalizeToolBackground, parsePageMarginSpec, resolveMathRendering, SIDE_PANEL_ID_PATTERN, type CodeFrameStyle, type ImageBacking, type MathImageBacking, type MathImageScale, type MathRendering, type PageMarginSetting, type ScrollGutterMode, type StatusBarConfig, type ToolBackground } from '../tuiDisplayPrefs.js'
 import {
@@ -2140,24 +2140,9 @@ export async function apply(ctx: Context, runtimeConfig: RuntimeConfig<Config>, 
     return ref.backendId === 'dsh' ? [] : [formatSessionRef(ref)]
   }))
 
-  // Check in the background so registry latency never delays the first frame.
-  // A failed/offline check is intentionally silent; the manual `/update`
-  // command remains available regardless of network access.
-  void checkForTuiUpdate().then((update) => {
-    if (update === undefined || exited || updateRequested) return
-    const key = update.isStandalone ? 'update-standalone-available' : 'update-available'
-    // A standalone release without a SHA256SUMS asset (published before the
-    // checksum workflow landed) still updates, but the notice must say the
-    // package's integrity cannot be verified — silent degradation is exactly
-    // how the unverified-download window went unnoticed.
-    const suffix = update.isStandalone && update.checksumUrl === undefined
-      ? ` ${t('update-standalone-no-checksum')}`
-      : ''
-    notifyChannel(
-      `${t(key, { current: update.current, latest: update.latest })}${suffix}`,
-      { color: 'warning', timeoutMs: 12000 },
-    )
-  })
+  // No background update check: this is the owner's fork, so a newer upstream release
+  // on the npm registry is not an update for it and the notice only nagged. `/update`
+  // still checks on demand.
 
   // If the surrounding tree goes down (reload, teardown), unmount the UI —
   // but flag it as teardown first so the settling waitUntilExit does not
