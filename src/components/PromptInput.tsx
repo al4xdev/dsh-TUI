@@ -1170,8 +1170,22 @@ export function PromptInput({
   const editorBusyRef = React.useRef(false)
   const grammarAbortRef = React.useRef<AbortController | null>(null)
   const [grammarPresentation, setGrammarPresentation] = React.useState<GrammarFixPresentation | null>(null)
+  const [grammarTip, setGrammarTip] = React.useState<string | null>(null)
+  const grammarTipAbortRef = React.useRef<AbortController | null>(null)
+  const grammarTipTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dismissGrammarTip = React.useCallback((): void => {
+    grammarTipAbortRef.current?.abort()
+    grammarTipAbortRef.current = null
+    if (grammarTipTimerRef.current !== null) {
+      clearTimeout(grammarTipTimerRef.current)
+      grammarTipTimerRef.current = null
+    }
+    setGrammarTip(null)
+  }, [])
+  React.useEffect(() => () => dismissGrammarTip(), [dismissGrammarTip])
   const grammarDraftRef = React.useRef<{ text: string; lease: DraftImageLease } | null>(null)
   const cancelGrammarFix = (notify: boolean): void => {
+    dismissGrammarTip()
     if (!grammarAbortRef.current) return
     grammarAbortRef.current.abort()
     grammarAbortRef.current = null
@@ -2183,6 +2197,7 @@ export function PromptInput({
    * operates on the text the preceding keys produced.
    */
   const handleEnter = () => {
+    dismissGrammarTip()
     // A single Enter can arrive as two events in cmd pipelines (`\r`
     // parsed as return + a raw `\n` line): collapse them so one keypress
     // never sends the message twice.
@@ -2770,6 +2785,7 @@ export function PromptInput({
       : undefined
     if (grammarShortcut && (grammar || !actionMatches('editor', input, key))) {
       event?.stopImmediatePropagation()
+      dismissGrammarTip()
       const commandMatch = value.match(/^(\s*\/\S+\s+)([\s\S]+)$/)
       const isPureCommand = value.trimStart().startsWith('/') && (!commandMatch || !commandMatch[2].trim())
       if (!value.trim() || isPureCommand) {
@@ -2807,6 +2823,26 @@ export function PromptInput({
             setFileSelected(0)
           }
           channel.notify(grammarFixSuccess(corrected === value))
+          const meta = grammar.describe(current)
+          if (meta.naturalTips && typeof grammar.suggestTip === 'function') {
+            const tipAbort = new AbortController()
+            grammarTipAbortRef.current = tipAbort
+            void (async () => {
+              try {
+                const tip = await grammar.suggestTip!(value, corrected, current, tipAbort.signal)
+                if (tipAbort.signal.aborted || grammarTipAbortRef.current !== tipAbort || !tip.trim()) return
+                setGrammarTip(tip.trim())
+                if (grammarTipTimerRef.current !== null) clearTimeout(grammarTipTimerRef.current)
+                grammarTipTimerRef.current = setTimeout(() => {
+                  setGrammarTip(null)
+                  grammarTipTimerRef.current = null
+                }, 8000)
+                grammarTipTimerRef.current.unref?.()
+              } catch {
+                // Tip failure is silent
+              }
+            })()
+          }
         } catch (error: unknown) {
           if (isCurrent()) {
             const err = error as { message?: string }
@@ -4692,6 +4728,11 @@ export function PromptInput({
         </Box>
       )}
       {grammarPresentation && <GrammarFixActivity presentation={grammarPresentation} />}
+      {grammarTip && !grammarPresentation && (
+        <Box paddingLeft={2} paddingRight={1} marginBottom={1}>
+          <Text color="warning" wrap="truncate">{grammarTip}</Text>
+        </Box>
+      )}
       {lastNotification && toastVisible && (
         // position=absolute takes zero layout height so the transcript never
         // shifts when a notification appears/disappears; the layer floats one

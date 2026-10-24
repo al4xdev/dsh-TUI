@@ -29,6 +29,7 @@ export interface GrammarFixMetadata {
   /** Human language label and model ID (without provider), resolved by the bridge. */
   language: string
   model: string
+  naturalTips?: boolean
 }
 export interface GrammarFixProgress {
   language?: string
@@ -39,6 +40,7 @@ export interface GrammarFixBridge {
   describe: (current: { provider?: string; model?: string }) => GrammarFixMetadata
   fix: (text: string, current: { provider?: string; model?: string }, signal?: AbortSignal,
     onProgress?: (message: string, metadata?: GrammarFixProgress) => void) => Promise<string>
+  suggestTip?: (original: string, corrected: string, current: { provider?: string; model?: string }, signal?: AbortSignal) => Promise<string>
 }
 export interface GrammarFixPresentation extends GrammarFixMetadata {
   startedAt: number

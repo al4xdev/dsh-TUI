@@ -689,13 +689,13 @@ export function Launchpad({
   /** 粘贴提示：落地页没有 toast 基础设施，借 Tips 行显示 4 秒（失败不能静默）。 */
   const [pasteNotice, setPasteNotice] = React.useState<string | undefined>(undefined)
   const noticeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const showPasteNotice = (message: string): void => {
+  const showPasteNotice = (message: string, durationMs = 4000): void => {
     setPasteNotice(message)
     if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current)
     const timer = setTimeout(() => {
       noticeTimerRef.current = null
       setPasteNotice(undefined)
-    }, 4000)
+    }, durationMs)
     ;(timer as { unref?: () => void }).unref?.()
     noticeTimerRef.current = timer
   }
@@ -961,6 +961,18 @@ export function Launchpad({
             alexGrammarUndo.current = original
             changeQuery(outcome.text, outcome.text.length)
             showPasteNotice(grammarPressed ? grammarFixSuccess(outcome.text === original) : t('grammar-draft-updated'))
+            const meta = grammar?.describe({ provider, model })
+            if (grammarPressed && meta?.naturalTips && typeof grammar?.suggestTip === 'function') {
+              void (async () => {
+                try {
+                  const tip = await grammar!.suggestTip!(original, outcome.text, { provider, model }, abort.signal)
+                  if (abort.signal.aborted || queryRevisionRef.current !== revision || !tip?.trim()) return
+                  showPasteNotice(tip.trim(), 8000)
+                } catch {
+                  // Tip failure is silent
+                }
+              })()
+            }
           } else showPasteNotice(t('grammar-editor-unavailable'))
         } catch (error: unknown) {
           if (!abort.signal.aborted) {
