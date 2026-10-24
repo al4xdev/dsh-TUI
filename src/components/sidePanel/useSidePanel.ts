@@ -296,6 +296,13 @@ export function useSidePanel(options: UseSidePanelOptions): SidePanelController 
       stop()
       return true
     }
+    // Local: Btw's Ctrl+G grammar correction. Only a panel that consumes it
+    // claims the key; otherwise it falls through to the global handlers below.
+    if (split && input === 'g' && key.ctrl === true && key.shift !== true && key.meta !== true
+      && activePanelId !== undefined && runtime.dispatchKey(activePanelId, input, key)) {
+      stop()
+      return true
+    }
     // Panel-focused keys. Ctrl/Alt combos fall through to Chat
     // (interrupt, exit, redraw and the other global actions keep working
     // from the panel); plain keys are the panel surface's own. Esc is the
@@ -303,12 +310,6 @@ export function useSidePanel(options: UseSidePanelOptions): SidePanelController 
     // meta pass-through must NOT claim it — Esc belongs to the panel
     // first (Detail → Dashboard) and then to the host fallback (→ chat).
     if (key.ctrl === true || (key.meta === true && key.escape !== true)) return false
-    // v2.1 第一棒：活动 Panel 的业务键优先（Subagent Detail 的 ←/→ 翻页、
-    // Esc 返回 Dashboard 都先由它自己决定）；它没吃才轮到宿主回退键。
-    if (activePanelId !== undefined && runtime.dispatchKey(activePanelId, input, key)) {
-      stop()
-      return true
-    }
     if (key.escape === true) {
       setFocus('chat')
       stop()

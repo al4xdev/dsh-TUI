@@ -19,6 +19,7 @@ import { useBtwComposerPaste } from './useBtwComposerPaste.js'
 import { BtwThreadView } from './BtwThreadView.js'
 import type { BtwTurn } from './threads.js'
 import type { ClipboardRead } from '../../../utils/clipboard.js'
+import { grammarFixSuccess, type GrammarFixBridge } from '../../grammarFixPresentation.js'
 
 export function BtwThreadScene({
   channel,
@@ -50,6 +51,9 @@ export function BtwThreadScene({
   const [notice, setNotice] = React.useState<{ readonly text: string; readonly failure: boolean } | null>(null)
   // Ctrl+V / Alt+V：与侧栏面板同一份实现（落点用实时草稿与 caret）。
   const paste = useBtwComposerPaste({ sessionId, caretRef, setCaret, setNotice, readClipboardOverride })
+  const grammarAbortRef = React.useRef<AbortController | null>(null)
+  const [grammarBusy, setGrammarBusy] = React.useState(false)
+  React.useEffect(() => () => grammarAbortRef.current?.abort(), [])
   const scrollRef = React.useRef<ScrollBoxHandle | null>(null)
   const busy = thread !== undefined && thread.activeTurnId !== null
   // 选中轮与侧栏面板同源（线程 store）：↑/↓ 移动、s 送聊天/撤回、c 复制。
@@ -109,7 +113,60 @@ export function BtwThreadScene({
   }, [sessionId, channel])
 
   useInput((input, key, event) => {
+    if (grammarBusy) {
+      event.stopImmediatePropagation()
+      if (key.escape || (key.ctrl && input === 'c')) {
+        grammarAbortRef.current?.abort()
+      }
+      return
+    }
     if (composerFocus) {
+      const grammarShortcut = input === 'g' && key.ctrl && !key.shift && !key.meta && !key.super
+      if (grammarShortcut) {
+        event.stopImmediatePropagation()
+        const grammar = (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as GrammarFixBridge | undefined
+        if (!grammar) {
+          channel.notify(t('grammar-unavailable'), { color: 'warning' })
+          return
+        }
+        const draft = btwThreads.get(sessionId)?.draft ?? ''
+        if (!draft.trim()) {
+          channel.notify(t('grammar-empty'))
+          return
+        }
+        const abort = new AbortController()
+        grammarAbortRef.current = abort
+        setGrammarBusy(true)
+        setNotice({ text: t('grammar-correcting'), failure: false })
+        const current = { provider: channel.provider, model: channel.model }
+        void (async () => {
+          try {
+            const corrected = await grammar.fix(draft, current, abort.signal)
+            if (abort.signal.aborted) return
+            if (!corrected.trim()) throw new Error(t('grammar-no-text'))
+            if (corrected !== draft) {
+              btwThreads.setDraft(sessionId, corrected)
+              setCaret(corrected.length)
+            }
+            setNotice(null)
+            channel.notify(grammarFixSuccess(corrected === draft))
+          } catch (error: unknown) {
+            if (!abort.signal.aborted) {
+              const err = error as { message?: string }
+              const message = t('grammar-failed', { error: String(err?.message ?? error) })
+              setNotice({ text: message, failure: true })
+              channel.notify(message, { color: 'error' })
+            } else {
+              setNotice(null)
+              channel.notify(t('grammar-canceled'))
+            }
+          } finally {
+            if (grammarAbortRef.current === abort) grammarAbortRef.current = null
+            setGrammarBusy(false)
+          }
+        })()
+        return
+      }
       const text = btwThreads.get(sessionId)?.draft ?? ''
       const result = btwComposerKey({ text, caret: caretRef.current }, input, key as Parameters<typeof btwComposerKey>[2])
       if (result !== null) {
@@ -199,7 +256,7 @@ export function BtwThreadScene({
       <BtwComposer
         state={{ text: thread?.draft ?? '', caret }}
         focused={composerFocus}
-        busy={busy}
+        busy={busy || grammarBusy}
         notice={notice === null ? undefined : notice}
         width={columns - 2}
         onActivate={activateComposer}

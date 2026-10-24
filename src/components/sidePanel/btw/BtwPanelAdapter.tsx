@@ -22,6 +22,7 @@ import { getBtwContextBudget, getBtwContextTurns } from '../../../tuiDisplayPref
 import { BtwComposer, btwComposerKey, type BtwComposerState } from './BtwComposer.js'
 import { useBtwComposerPaste } from './useBtwComposerPaste.js'
 import { BtwThreadView } from './BtwThreadView.js'
+import { grammarFixSuccess, type GrammarFixBridge } from '../../grammarFixPresentation.js'
 import type { PanelKeyHandler, PanelProps } from '../types.js'
 import type { BtwTurn } from './threads.js'
 
@@ -68,6 +69,9 @@ export function BtwPanelAdapter({ width, height, focused, visible }: PanelProps)
   const paste = useBtwComposerPaste({ sessionId, caretRef, setCaret, setNotice })
   // 列表态的滚动句柄（阅读态：↑/↓/PgUp/PgDn 归线程，编辑态仍归输入框）。
   const scrollRef = React.useRef<ScrollBoxHandle | null>(null)
+  const grammarAbortRef = React.useRef<AbortController | null>(null)
+  const [grammarBusy, setGrammarBusy] = React.useState(false)
+  React.useEffect(() => () => grammarAbortRef.current?.abort(), [])
 
   // badge（镜像 jobs：version/visible 驱动；可见即已读）。
   React.useEffect(() => {
@@ -187,7 +191,59 @@ export function BtwPanelAdapter({ width, height, focused, visible }: PanelProps)
 
   // ── 键盘：composer 层 > 列表层 > 宿主（未消费的键返回 false）──────────
   const onKey = React.useCallback<PanelKeyHandler>((input, key) => {
+    if (grammarBusy) {
+      if (key.escape === true || (key.ctrl === true && input === 'c')) {
+        grammarAbortRef.current?.abort()
+        return true
+      }
+      return true
+    }
     if (composerFocusRef.current) {
+      const grammarShortcut = input === 'g' && key.ctrl === true && key.shift !== true && key.meta !== true
+      if (grammarShortcut) {
+        const grammar = (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as GrammarFixBridge | undefined
+        if (!grammar) {
+          channel.notify(t('grammar-unavailable'), { color: 'warning' })
+          return true
+        }
+        const draft = btwThreads.get(sessionId)?.draft ?? ''
+        if (!draft.trim()) {
+          channel.notify(t('grammar-empty'))
+          return true
+        }
+        const abort = new AbortController()
+        grammarAbortRef.current = abort
+        setGrammarBusy(true)
+        setNotice({ text: t('grammar-correcting'), failure: false })
+        const current = { provider: channel.provider, model: channel.model }
+        void (async () => {
+          try {
+            const corrected = await grammar.fix(draft, current, abort.signal)
+            if (abort.signal.aborted) return
+            if (!corrected.trim()) throw new Error(t('grammar-no-text'))
+            if (corrected !== draft) {
+              btwThreads.setDraft(sessionId, corrected)
+              setCaret(corrected.length)
+            }
+            setNotice(null)
+            channel.notify(grammarFixSuccess(corrected === draft))
+          } catch (error: unknown) {
+            if (!abort.signal.aborted) {
+              const err = error as { message?: string }
+              const message = t('grammar-failed', { error: String(err?.message ?? error) })
+              setNotice({ text: message, failure: true })
+              channel.notify(message, { color: 'error' })
+            } else {
+              setNotice(null)
+              channel.notify(t('grammar-canceled'))
+            }
+          } finally {
+            if (grammarAbortRef.current === abort) grammarAbortRef.current = null
+            setGrammarBusy(false)
+          }
+        })()
+        return true
+      }
       const text = btwThreads.get(sessionId)?.draft ?? ''
       const result = btwComposerKey({ text, caret: caretRef.current }, input, key as Parameters<typeof btwComposerKey>[2])
       if (result === null) return false
@@ -232,7 +288,7 @@ export function BtwPanelAdapter({ width, height, focused, visible }: PanelProps)
     // 其余不独占：返回 false 交宿主（Esc 回聊天、←/→ 切面板、1-9 跳面板）。
     return false
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, submitDraft, newTopic, sendToChat, copySelected, moveSelection, selectedTurnNow, height, setCaret, paste])
+  }, [sessionId, submitDraft, newTopic, sendToChat, copySelected, moveSelection, selectedTurnNow, height, setCaret, paste, channel, grammarBusy])
   usePanelInput(onKey, { active: focused && visible })
 
   // ── 头部（只有线程后才画）：首问标题 + 状态徽 + 新话题，下压一条细线 ──
@@ -304,7 +360,7 @@ export function BtwPanelAdapter({ width, height, focused, visible }: PanelProps)
       <BtwComposer
         state={{ text: thread?.draft ?? '', caret }}
         focused={composerFocus && focused && visible}
-        busy={busy}
+        busy={busy || grammarBusy}
         notice={notice === undefined || notice === null ? undefined : notice}
         width={width}
         onActivate={activateComposer}
