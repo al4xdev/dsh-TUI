@@ -2651,7 +2651,9 @@ export function PromptInput({
       : undefined
     if (grammarShortcut && (grammar || !actionMatches('editor', input, key))) {
       event?.stopImmediatePropagation()
-      if (!value.trim() || value.trimStart().startsWith('/')) {
+      const commandMatch = value.match(/^(\s*\/\S+\s+)([\s\S]+)$/)
+      const isPureCommand = value.trimStart().startsWith('/') && (!commandMatch || !commandMatch[2].trim())
+      if (!value.trim() || isPureCommand) {
         channel.notify(t(!value.trim() ? 'grammar-empty' : 'grammar-command'))
         return
       }

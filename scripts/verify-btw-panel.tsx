@@ -522,6 +522,40 @@ async function mountChat(ask: ReturnType<typeof scriptedAsk>) {
   await chat.unmount()
 }
 
+// ── G1: btw 面板 composer 支持 Ctrl+G 语法修正 ───────────────────────────
+{
+  const ask = scriptedAsk()
+  const channel = makePanelChannel(ask)
+  const frame = await mountPanel(100, 'btw', true, channel)
+  const bridgeKey = Symbol.for('alex.dsh.grammar-fix')
+  const originalBridge = (globalThis as Record<symbol, unknown>)[bridgeKey]
+
+  // 1. 无插件时按 Ctrl+G：通知不可用，草稿原样保留，不崩溃
+  delete (globalThis as Record<symbol, unknown>)[bridgeKey]
+  await keys(frame, ['t', 'e', 's', 't', String.fromCharCode(7)])
+  await delay(150)
+  check('G1a. 无插件时 Ctrl+G 草稿原样保留', btwThreads.get('probe-session')?.draft === 'test')
+  check('G1b. 无插件时通知不可用', channel.notices.some(n => n.includes('未启用') || n.includes('unavailable')))
+
+  // 2. 有插件时按 Ctrl+G：草稿被修正替换
+  let fixedWith = ''
+  ;(globalThis as Record<symbol, unknown>)[bridgeKey] = {
+    describe: () => ({ language: 'English', model: 'test' }),
+    fix: async (draft: string) => {
+      fixedWith = draft
+      return 'corrected test'
+    },
+  }
+  await keys(frame, [String.fromCharCode(7)])
+  await delay(250)
+  check('G1c. 有插件时 Ctrl+G 调用 bridge.fix', fixedWith === 'test')
+  check('G1d. 有插件时草稿更新为修正后文本', btwThreads.get('probe-session')?.draft === 'corrected test')
+
+  if (originalBridge !== undefined) (globalThis as Record<symbol, unknown>)[bridgeKey] = originalBridge
+  else delete (globalThis as Record<symbol, unknown>)[bridgeKey]
+  await frame.app.unmount()
+}
+
 btwThreads.resetForTest()
 console.log(failures === 0 ? '\nbtw-panel: ALL PASS' : '\nbtw-panel: ' + failures + ' FAIL')
 process.exit(failures === 0 ? 0 : 1)

@@ -770,7 +770,9 @@ export function Launchpad({
       && (grammar !== undefined || !actionMatches('editor', input, key))
     if (grammarPressed || actionMatches('editor', input, key)) {
       event?.stopImmediatePropagation()
-      if (!query.trim() || (grammarPressed && query.startsWith('/'))) return
+      const commandMatch = query.match(/^(\s*\/\S+\s+)([\s\S]+)$/)
+      const isPureCommand = query.trimStart().startsWith('/') && (!commandMatch || !commandMatch[2].trim())
+      if (!query.trim() || (grammarPressed && isPureCommand)) return
       if (grammarPressed && !grammar) {
         showPasteNotice(t('grammar-unavailable'))
         return
