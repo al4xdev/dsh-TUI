@@ -551,6 +551,20 @@ async function mountChat(ask: ReturnType<typeof scriptedAsk>) {
   check('G1c. 有插件时 Ctrl+G 调用 bridge.fix', fixedWith === 'test')
   check('G1d. 有插件时草稿更新为修正后文本', btwThreads.get('probe-session')?.draft === 'corrected test')
 
+  // 3. 有插件且开启 naturalTips 时：fix 完成后触发 suggestTip
+  let tipRequested = false
+  ;(globalThis as Record<symbol, unknown>)[bridgeKey] = {
+    describe: () => ({ language: 'English', model: 'test', naturalTips: true }),
+    fix: async (draft: string) => draft,
+    suggestTip: async () => {
+      tipRequested = true
+      return '💡 Natural phrasing tip'
+    },
+  }
+  await keys(frame, [String.fromCharCode(7)])
+  await delay(250)
+  check('G1e. 开启 naturalTips 时调用 suggestTip', tipRequested === true)
+
   if (originalBridge !== undefined) (globalThis as Record<symbol, unknown>)[bridgeKey] = originalBridge
   else delete (globalThis as Record<symbol, unknown>)[bridgeKey]
   await frame.app.unmount()

@@ -1085,13 +1085,10 @@ const dict = {
   'update-unavailable': { zh: '当前运行方式不支持自动更新（需经 dsh --profile 启动），请在终端执行 dsh plugin --profile <name> update @deepseek-harness-tui/dsh-tui', en: 'Automatic update is unavailable in this launch mode (needs dsh --profile). Run dsh plugin --profile <name> update @deepseek-harness-tui/dsh-tui in a terminal.' },
   'update-working': { zh: '当前回合仍在运行，请等待完成后再更新 TUI。', en: 'The current turn is still running. Wait for it to finish before updating the TUI.' },
   'update-starting': { zh: '正在更新 @deepseek-harness-tui/dsh-tui，完成后会自动重启并恢复当前会话……', en: 'Updating @deepseek-harness-tui/dsh-tui. The TUI will restart and resume this session when finished…' },
-  'update-available': { zh: '发现新版本：v{{latest}}（当前 v{{current}}）· 输入 /update 更新 TUI', en: 'New version available: v{{latest}} (current v{{current}}) · type /update to update the TUI' },
   'update-already-latest': { zh: '当前已是最新版本（v{{current}}）。', en: 'Already on the latest version (v{{current}}).' },
   'update-check-failed': { zh: '无法确认新版本（网络或 registry 不可达），已尝试直接更新……', en: 'Could not confirm a newer version (network or registry unreachable); attempting the update anyway…' },
   'update-refused-deadlock': { zh: '已取消更新：镜像 registry 目前只能装到 v{{latest}}，而该版本在旧全局启动器的 patch 下会启动死锁（#183/#307）；官方最新为 v{{authoritative}}，待镜像同步后再 /update。', en: 'Update cancelled: the mirror registry can only serve v{{latest}}, which deadlocks boot under older global-launcher patches (#183/#307); official latest is v{{authoritative}} — retry /update after the mirror syncs.' },
   'update-mirror-lag': { zh: '镜像 registry 滞后：本次安装 v{{latest}}；官方最新 v{{authoritative}}，镜像同步后可再 /update。', en: 'Mirror registry lag: installing v{{latest}} now; official latest is v{{authoritative}} — run /update again once the mirror syncs.' },
-  'update-standalone-available': { zh: '发现便携包新版本：v{{latest}}（当前 v{{current}}）· 输入 /update 自动更新', en: 'New standalone version available: v{{latest}} (current v{{current}}) · type /update to update' },
-  'update-standalone-no-checksum': { zh: '该版本未发布 SHA256 校验和，更新包完整性无法验证', en: 'this release publishes no SHA256 checksums; the update payload cannot be integrity-verified' },
   'update-standalone-starting': { zh: '正在下载便携包新版本并自动替换，完成后会自动重启并恢复当前会话……', en: 'Downloading and replacing standalone binary. The TUI will restart and resume this session when finished…' },
   // ── /reload (pi-style soft reload) ────────────────────────────────────
   'reload-header': { zh: '已重读偏好文件：', en: 'Preferences reloaded:' },

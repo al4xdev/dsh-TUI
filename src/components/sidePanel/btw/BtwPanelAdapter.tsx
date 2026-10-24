@@ -50,7 +50,20 @@ export function BtwPanelAdapter({ width, height, focused, visible }: PanelProps)
   const [notice, setNotice] = React.useState<{ readonly text: string; readonly failure: boolean } | null>(null)
   const grammarAbortRef = React.useRef<AbortController | null>(null)
   const [grammarBusy, setGrammarBusy] = React.useState(false)
-  React.useEffect(() => () => grammarAbortRef.current?.abort(), [])
+  const grammarTipAbortRef = React.useRef<AbortController | null>(null)
+  const grammarTipTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dismissGrammarTip = React.useCallback((): void => {
+    grammarTipAbortRef.current?.abort()
+    grammarTipAbortRef.current = null
+    if (grammarTipTimerRef.current !== null) {
+      clearTimeout(grammarTipTimerRef.current)
+      grammarTipTimerRef.current = null
+    }
+  }, [])
+  React.useEffect(() => () => {
+    grammarAbortRef.current?.abort()
+    dismissGrammarTip()
+  }, [dismissGrammarTip])
 
   // badge（镜像 jobs：version/visible 驱动；可见即已读）。
   React.useEffect(() => {
@@ -86,6 +99,7 @@ export function BtwPanelAdapter({ width, height, focused, visible }: PanelProps)
   }, [channel])
 
   const submitDraft = React.useCallback(() => {
+    dismissGrammarTip()
     const text = btwThreads.get(sessionId)?.draft ?? ''
     if (text.trim() === '') return
     const result = btwThreads.submit(sessionId, text, (question, options) => channel.sideQuestion(question, options), btwContextOptions())
@@ -120,6 +134,7 @@ export function BtwPanelAdapter({ width, height, focused, visible }: PanelProps)
     if (composerFocus) {
       const grammarShortcut = input === 'g' && key.ctrl === true && key.shift !== true && key.meta !== true
       if (grammarShortcut) {
+        dismissGrammarTip()
         const grammar = (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as GrammarFixBridge | undefined
         if (!grammar) {
           channel.notify(t('grammar-unavailable'), { color: 'warning' })
@@ -146,6 +161,26 @@ export function BtwPanelAdapter({ width, height, focused, visible }: PanelProps)
             }
             setNotice(null)
             channel.notify(grammarFixSuccess(corrected === draft))
+            const meta = grammar.describe(current)
+            if (meta.naturalTips && typeof grammar.suggestTip === 'function') {
+              const tipAbort = new AbortController()
+              grammarTipAbortRef.current = tipAbort
+              void (async () => {
+                try {
+                  const tip = await grammar.suggestTip!(draft, corrected, current, tipAbort.signal)
+                  if (tipAbort.signal.aborted || grammarTipAbortRef.current !== tipAbort || !tip.trim()) return
+                  setNotice({ text: tip.trim(), failure: false })
+                  if (grammarTipTimerRef.current !== null) clearTimeout(grammarTipTimerRef.current)
+                  grammarTipTimerRef.current = setTimeout(() => {
+                    setNotice(null)
+                    grammarTipTimerRef.current = null
+                  }, 8000)
+                  grammarTipTimerRef.current.unref?.()
+                } catch {
+                  // Tip failure is silent
+                }
+              })()
+            }
           } catch (error: unknown) {
             if (!abort.signal.aborted) {
               const err = error as { message?: string }
