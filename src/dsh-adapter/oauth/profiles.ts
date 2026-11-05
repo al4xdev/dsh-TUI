@@ -107,6 +107,16 @@ function withModelOverrides(
   }
 }
 
+/** Retry codes for a provider: config parsing fills omitted codes with the stock set, so a
+ * set equal to stock means "not specified" and keeps the widened upstream codes. */
+function providerRetryableCodes(policy: RetryPolicyConfig | undefined): string[] {
+  const provided = (policy as { retryableCodes?: readonly string[] } | undefined)?.retryableCodes
+  if (provided === undefined) return [...UPSTREAM_RETRYABLE_CODES]
+  const stock = (resolveRetryPolicy(undefined, 'dsh-auth: stock retry codes') as { retryableCodes?: readonly string[] }).retryableCodes ?? []
+  const sameAsStock = provided.length === stock.length && provided.every(code => stock.includes(code))
+  return sameAsStock ? [...UPSTREAM_RETRYABLE_CODES] : [...provided]
+}
+
 /**
  * Build the resolved profile one route registers under. Mirrors the fields
  * `PiAiAdapter` reads: identity for selectors, the idle timeout, retry
@@ -137,10 +147,18 @@ export function buildOAuthProfile(
     // The widened upstream-retry codes (upstream-retry.ts) are the base: the
     // stock default set would leave STREAM_CLOSED — a dropped upstream stream
     // — un-retried on this plugin's own routes too. A provider-owned policy
-    // from config overrides field by field, so omitting `retryableCodes` there
-    // keeps the widened set instead of silently narrowing it.
+    // from config overrides field by field. Config parsing fills omitted
+    // `retryableCodes` with the stock set, so a set equal to the stock one is
+    // treated as "not specified" and keeps the widened codes; any other
+    // explicit set wins.
     retryPolicy: resolveRetryPolicy(
-      { mode: 'normal', maxRetries: UPSTREAM_RETRY_MAX_RETRIES, retryableCodes: [...UPSTREAM_RETRYABLE_CODES], ...retryPolicy },
+      // Cast: spreading a discriminated union widens `mode`; resolveRetryPolicy re-validates it.
+      {
+        mode: 'normal',
+        maxRetries: UPSTREAM_RETRY_MAX_RETRIES,
+        ...retryPolicy,
+        retryableCodes: providerRetryableCodes(retryPolicy),
+      } as RetryPolicyConfig,
       `dsh-auth: provider "${id}" retryPolicy`,
     ),
     configuredMaxTokens: new Map(),

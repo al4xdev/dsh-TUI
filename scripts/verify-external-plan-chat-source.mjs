@@ -51,7 +51,9 @@ for (const external of [false, true]) {
       assert.deepEqual(f.overlays, [{ type: 'open', overlay: { kind: 'plan', index: 0 } }])
       assert.deepEqual(f.commands, [])
     } else {
-      assert.deepEqual(f.commands, [['plan', input, []]], 'artifact arguments and native arguments pass through verbatim')
+      // Upstream's native grammar is `/plan [off|message]`: a bare `on` is mapped to no argument.
+      const expected = !external && input === ' on' ? '' : input
+      assert.deepEqual(f.commands, [['plan', expected, []]], 'artifact arguments and native arguments pass through verbatim')
       assert.deepEqual(f.overlays, [])
     }
   }

@@ -33,7 +33,14 @@ globalThis.WebSocket = class {
 }
 const oauth = await import(pathToFileURL(join(compiled, 'oauth.js')).href)
 const { buildOAuthProfile } = oauth
-const defaults = resolveRetryPolicy(undefined, 'fixture default')
+// Baseline is the build's widened upstream-retry policy (it adds STREAM_CLOSED), which an
+// omitted provider policy keeps; a provider-owned policy overrides it field by field.
+const { UPSTREAM_RETRY_MAX_RETRIES, UPSTREAM_RETRYABLE_CODES } = await import(
+  pathToFileURL(join(compiled, 'dsh-adapter/channel/upstream-retry.js')).href)
+const defaults = resolveRetryPolicy(
+  { mode: 'normal', maxRetries: UPSTREAM_RETRY_MAX_RETRIES, retryableCodes: [...UPSTREAM_RETRYABLE_CODES] },
+  'fixture default',
+)
 const long = {
   mode: 'normal', maxRetries: 9,
   backoff: { initialDelayMs: 5000, maxDelayMs: 1200000, jitterRatio: 0.1 },
