@@ -33,3 +33,12 @@ Plugin config `updateCheck: false` skips the startup "new version available"
 notice and the launchpad update action. This fork is not the npm package, so a
 newer upstream release is not an update for it. `/update` still checks on demand.
 Default `true` keeps upstream behavior. Upstream candidate.
+
+### Markdown for scenes
+
+Full-screen scenes receive `ui.Markdown`, `ui.markdownSourceRange` and
+`ui.markdownSourceBlocks`. `preserveSource` keeps prompt XML tags (alias of
+`stripPromptTags: false`). Optional `sourceNavigation: { line, onSelect,
+commentLines, scrollRef }` adds a block cursor and mouse selection; list items
+are separate anchors, wrapped terminal rows are never source lines. Used by the
+dsh-customs `managed-plans` scene.
