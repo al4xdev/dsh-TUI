@@ -296,6 +296,10 @@ export interface Config {
    *  channels are never written; routes with an explicit retryPolicy are
    *  never overwritten; setting this to false opts out entirely. */
   upstreamRetry?: boolean
+  /** Automatic "new version" probes (default on): the startup notice and the
+   *  launchpad update action. `false` silences both for builds that are not
+   *  the published package (a fork); `/update` still checks on demand. */
+  updateCheck?: boolean
 }
 
 /** The complete two-stage parse: syntax, then registry membership (P0 D1).
@@ -471,6 +475,7 @@ export const Config: Schema<Config, RuntimeConfig<Config>> = editableConfig<Conf
   // Upstream auto-retry seeding (see upstream-retry.ts): on by default so
   // an upstream link drop retries like any other transient failure.
   upstreamRetry: Schema.boolean().default(true),
+  updateCheck: Schema.boolean().default(true),
 }), EDITABLE_CONFIG_KEYS as readonly (keyof Config)[])
 
 /**

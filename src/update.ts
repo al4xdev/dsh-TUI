@@ -1052,17 +1052,29 @@ export async function resolveTuiUpdateTarget(signal?: AbortSignal): Promise<TuiU
   return { kind: 'update', current: currentVersion, latest, ...(authoritative === undefined ? {} : { authoritative }) }
 }
 
+/** Config `updateCheck`; gates only the automatic probes, never `/update`. */
+let automaticUpdateCheck = true
+
+/** Set at boot from the plugin config, and again when the package entry's
+ *  DSH row attaches (that boot starts on schema defaults). */
+export function setAutomaticUpdateCheck(enabled: boolean): void {
+  automaticUpdateCheck = enabled
+}
+
 /**
  * Check npm for a newer published TUI version. Network and registry errors
  * are intentionally treated as "no result" so an offline launch never delays
  * or blocks the interactive TUI.
  */
 export async function checkForTuiUpdate(): Promise<TuiUpdateInfo | undefined> {
+  if (!automaticUpdateCheck) return undefined
   // Callers start this during the first render; the first `fetch()` loads
   // undici synchronously, so yield first and let that cost land after the frame.
   await new Promise<void>(resolve => setImmediate(resolve))
   const target = await resolveTuiUpdateTarget()
-  return target.kind === 'update'
+  // Re-read after the network round-trip: on the package entry the row's
+  // `updateCheck: false` usually lands while the registry is answering.
+  return target.kind === 'update' && automaticUpdateCheck
     ? {
         current: target.current,
         latest: target.latest,

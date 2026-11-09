@@ -26,3 +26,10 @@ Then bump the TUI pin in dsh-customs `tools/clean-install/forks-manifest.json`.
 On DSH, questionnaires from sessions whose background handles belong to this TUI
 remain answerable after `/bg`. Other terminals' agents are not claimed.
 Upstream candidate (bug fix).
+
+### `updateCheck: false`
+
+Plugin config `updateCheck: false` skips the startup "new version available"
+notice and the launchpad update action. This fork is not the npm package, so a
+newer upstream release is not an update for it. `/update` still checks on demand.
+Default `true` keeps upstream behavior. Upstream candidate.
