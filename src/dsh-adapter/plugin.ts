@@ -67,7 +67,7 @@ import { armFirstFrameAck, beginHandoffAck, handoffAttemptId, ownsAltScreenExit 
 import { DSH_BACKEND_ID, HOST_NOTICE_ENV, KERNEL_SWITCH_HANDOFF_ENV, RESUME_BACKEND_ENV, RESUME_RETRY_ENV, parseBackendId, readKernelPrefs, resolveRememberedBackend, resolveResumeTarget, writeKernelPrefs, type KernelBackendId } from '../kernelPrefs.js'
 import { shouldOfferOnboarding } from '../onboardingPrefs.js'
 import { resolveSessionCwd } from '../utils/workspaceRoot.js'
-import { LAUNCH_PROMPT_SENT_ENV, beginRestartAttempt, blockedUpdateMessages, checkForTuiUpdate, describeHostStepReason, describeLauncherStepReason, engineSkipMessages, idleReportMessages, installedTuiVersion, isBootDeadlockTarget, isStandaloneRuntime, isVersionNewer, logRestartEvent, resolveDshProfileName, resolveUpdatePlan, restartTui, updatePlanLayers, updatePlanState, updatePlanSuite, updateTuiAndRestart, writeHandoffNotice, writeLastRunRecord, type TuiRestartOptions, type UpdatePlan } from '../update.js'
+import { LAUNCH_PROMPT_SENT_ENV, beginRestartAttempt, blockedUpdateMessages, describeHostStepReason, describeLauncherStepReason, engineSkipMessages, idleReportMessages, installedTuiVersion, isBootDeadlockTarget, isStandaloneRuntime, isVersionNewer, logRestartEvent, resolveDshProfileName, resolveUpdatePlan, restartTui, updatePlanLayers, updatePlanState, updatePlanSuite, updateTuiAndRestart, writeHandoffNotice, writeLastRunRecord, type TuiRestartOptions, type UpdatePlan } from '../update.js'
 import { getLang, isLang, resolveStartupLang, setLang, t, writeLangPref } from '../i18n.js'
 import { applyBtwContextBudget, applyBtwContextTurns, applyCodeFrameStyle, applyCompanionSkin, applyImageBacking, applyMathImageBacking, applyMathImageScale, applyMathRendering, applyMermaidDiagrams, applyPageMargin, applySidePanelOpen, applySidePanelPanels, applySidePanelRatio, applySidePanelSplitEnabled, ALL_SIDE_PANELS, BTW_CONTEXT_BUDGET_MAX, BTW_CONTEXT_BUDGET_MIN, BTW_CONTEXT_TURNS_MAX, BTW_CONTEXT_TURNS_MIN, DEFAULT_PAGE_MARGIN, DEFAULT_STATUS_BAR, isPageMarginMode, normalizeJobGroupFold, normalizePageMargin, normalizeScrollGutter, normalizeSidePanelPanels, normalizeSidePanelRatio, normalizePluginFieldsOrder, normalizeStatusBar, normalizeToolBackground, parsePageMarginSpec, parsePluginFieldsOrder, parseSidePanelPanels, resolveMathRendering, type CodeFrameStyle, type ImageBacking, type MathImageBacking, type MathImageScale, type MathRendering, type PageMarginSetting, type ScrollGutterMode, type StatusBarConfig, type ToolBackground } from '../tuiDisplayPrefs.js'
 import {
@@ -1204,6 +1204,7 @@ export async function apply(ctx: Context, runtimeConfig: RuntimeConfig<Config>, 
     // Raw cordis.yml `lang` / `activityFrames`: /reload must not override a
     // static deployment choice with the persisted preference.
     configuredLang: config.lang,
+    externalPlanCommand: config.externalPlanCommand,
     configuredActivityFrames: config.activityFrames,
     // Read when the DSH extensions attach (the adoption), after the row's
     // facts are in; the display fields below are fixed at the first frame.
@@ -1348,9 +1349,10 @@ export async function apply(ctx: Context, runtimeConfig: RuntimeConfig<Config>, 
   }
   bindToastSink()
   if (questionSeams?.registration.kind === 'waterfall') {
-    // Ownership follows the mutable channel; registration cleanup belongs to
-    // this Cordis fiber.
-    questionSeams.registration.register(channel)
+    // The raw channel owns the foreground and parked handles; the UI facade
+    // is a different object and must not lose that background ownership.
+    // Registration cleanup belongs to this Cordis fiber.
+    questionSeams.registration.register(rawChannel)
   }
   // Fullscreen layout decision: the settings user layer (edited through the
   // /settings screen) overrides cordis.yml when set. The settings injection
@@ -2956,24 +2958,9 @@ export async function apply(ctx: Context, runtimeConfig: RuntimeConfig<Config>, 
     return ref.backendId === 'dsh' ? [] : [formatSessionRef(ref)]
   }))
 
-  // Check in the background so registry latency never delays the first frame.
-  // A failed/offline check is intentionally silent; the manual `/update`
-  // command remains available regardless of network access.
-  void checkForTuiUpdate().then((update) => {
-    if (update === undefined || exited || updateRequested) return
-    const key = update.isStandalone ? 'update-standalone-available' : 'update-available'
-    // A standalone release without a SHA256SUMS asset (published before the
-    // checksum workflow landed) still updates, but the notice must say the
-    // package's integrity cannot be verified — silent degradation is exactly
-    // how the unverified-download window went unnoticed.
-    const suffix = update.isStandalone && update.checksumUrl === undefined
-      ? ` ${t('update-standalone-no-checksum')}`
-      : ''
-    notifyChannel(
-      `${t(key, { current: update.current, latest: update.latest })}${suffix}`,
-      { color: 'warning', timeoutMs: 12000 },
-    )
-  })
+  // No background update check: this is the owner's fork, so a newer upstream release
+  // on the npm registry is not an update for it and the notice only nagged. `/update`
+  // still checks on demand.
 
   // If the surrounding tree goes down (reload, teardown), unmount the UI —
   // but flag it as teardown first so the settling waitUntilExit does not

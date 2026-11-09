@@ -133,8 +133,8 @@ export const TIPS: readonly Tip[] = [
   {
     id: 'keys-shift-tab',
     group: 'keys',
-    zh: 'Shift+Tab 循环会话模式：默认→计划→完全访问（挂了第三方权限预设时按 registry 顺序追加到末尾）',
-    en: 'Shift+Tab cycles modes: default → plan → full access (third-party presets append in registry order)',
+    zh: 'Shift+Tab 循环当前可用的会话模式；顺序取决于配置与 registry',
+    en: 'Shift+Tab cycles available session modes; order follows configuration and the registry',
   },
   {
     id: 'keys-shift-up',
@@ -441,8 +441,8 @@ export const TIPS: readonly Tip[] = [
   {
     id: 'cmd-plan-goal',
     group: 'commands',
-    zh: '/plan 计划模式；/goal 设置会话目标',
-    en: '/plan enters plan mode; /goal sets a session goal',
+    zh: '/plan 打开当前配置的计划界面；/goal 设置会话目标',
+    en: '/plan opens the configured planning interface; /goal sets a session goal',
   },
 
   // ── 工作流 ────────────────────────────────────────────────
@@ -563,8 +563,8 @@ export const TIPS: readonly Tip[] = [
   {
     id: 'flow-plan-review',
     group: 'workflow',
-    zh: '计划评审按 1 / 2 数字键快速批准或反馈',
-    en: 'Plan review: press 1 / 2 to approve or give feedback fast',
+    zh: '计划评审按当前界面显示的操作键批准或反馈；不同提供者的快捷键不同',
+    en: 'Plan review: use the action keys shown in the active interface; shortcuts vary by provider',
   },
   {
     id: 'flow-approval',

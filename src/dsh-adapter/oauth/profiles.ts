@@ -15,6 +15,7 @@
  */
 
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
+import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { UPSTREAM_RETRY_MAX_RETRIES, UPSTREAM_RETRYABLE_CODES } from '../channel/upstream-retry.js'
 import { adapterBuiltinProviders, type PiAiProvider } from './pi-ai.js'
@@ -106,6 +107,16 @@ function withModelOverrides(
   }
 }
 
+/** Retry codes for a provider: config parsing fills omitted codes with the stock set, so a
+ * set equal to stock means "not specified" and keeps the widened upstream codes. */
+function providerRetryableCodes(policy: RetryPolicyConfig | undefined): string[] {
+  const provided = (policy as { retryableCodes?: readonly string[] } | undefined)?.retryableCodes
+  if (provided === undefined) return [...UPSTREAM_RETRYABLE_CODES]
+  const stock = (resolveRetryPolicy(undefined, 'dsh-auth: stock retry codes') as { retryableCodes?: readonly string[] }).retryableCodes ?? []
+  const sameAsStock = provided.length === stock.length && provided.every(code => stock.includes(code))
+  return sameAsStock ? [...UPSTREAM_RETRYABLE_CODES] : [...provided]
+}
+
 /**
  * Build the resolved profile one route registers under. Mirrors the fields
  * `PiAiAdapter` reads: identity for selectors, the idle timeout, retry
@@ -115,10 +126,12 @@ function withModelOverrides(
  * @param id - the OAuth provider route to mount.
  * @param modelOverrides - optional per-model catalog overrides (see
  *   {@link ModelOverride}); `undefined` serves the installed catalog unchanged.
+ * @param retryPolicy - optional provider-owned policy; omission keeps Harness defaults.
  */
 export function buildOAuthProfile(
   id: string,
   modelOverrides?: Readonly<Record<string, ModelOverride>>,
+  retryPolicy?: RetryPolicyConfig,
 ): ResolvedPiAiProviderProfile {
   if (!(OAUTH_PROVIDER_IDS as readonly string[]).includes(id)) {
     throw new Error(`dsh-auth: "${id}" is not an OAuth provider this build mounts (${OAUTH_PROVIDER_IDS.join(', ')})`)
@@ -131,11 +144,21 @@ export function buildOAuthProfile(
     provider: id,
     displayName: catalog.name,
     streamIdleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
-    // The widened upstream-retry codes (upstream-retry.ts): the stock
-    // default set would leave STREAM_CLOSED — a dropped upstream stream
-    // — un-retried on this plugin's own routes too.
+    // The widened upstream-retry codes (upstream-retry.ts) are the base: the
+    // stock default set would leave STREAM_CLOSED — a dropped upstream stream
+    // — un-retried on this plugin's own routes too. A provider-owned policy
+    // from config overrides field by field. Config parsing fills omitted
+    // `retryableCodes` with the stock set, so a set equal to the stock one is
+    // treated as "not specified" and keeps the widened codes; any other
+    // explicit set wins.
     retryPolicy: resolveRetryPolicy(
-      { mode: 'normal', maxRetries: UPSTREAM_RETRY_MAX_RETRIES, retryableCodes: [...UPSTREAM_RETRYABLE_CODES] },
+      // Cast: spreading a discriminated union widens `mode`; resolveRetryPolicy re-validates it.
+      {
+        mode: 'normal',
+        maxRetries: UPSTREAM_RETRY_MAX_RETRIES,
+        ...retryPolicy,
+        retryableCodes: providerRetryableCodes(retryPolicy),
+      } as RetryPolicyConfig,
       `dsh-auth: provider "${id}" retryPolicy`,
     ),
     configuredMaxTokens: new Map(),

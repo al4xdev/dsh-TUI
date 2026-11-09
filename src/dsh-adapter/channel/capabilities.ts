@@ -181,10 +181,19 @@ function recordedPresetId(agent: Agent): string | undefined {
 export function annotateCommandCapabilities(
   commands: readonly LocalCommand[],
   capabilities: AgentCapabilities,
+  externalPlanCommand = false,
 ): LocalCommand[] {
   let annotated: LocalCommand[] | undefined
   commands.forEach((command, index) => {
     const gate = COMMAND_CAPABILITIES.get(command.name)
+    if (command.name === 'plan' && externalPlanCommand) {
+      annotated ??= [...commands]
+      annotated[index] = { ...command,
+        description: 'Browse project .plan artifacts (not native Plan mode)',
+        descriptionKey: capabilities.plan.route === 'none' ? 'plan-artifact-unavailable' : 'plan-artifact-browser-desc',
+      }
+      return
+    }
     if (gate === undefined || gate(capabilities).route !== 'none') return
     annotated ??= [...commands]
     annotated[index] = { ...command, descriptionKey: `cmd-desc-${command.name}-unavailable` }

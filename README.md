@@ -17,6 +17,48 @@
 
 # dsh-TUI
 
+### Managed plan addon seam (local source extension)
+
+Plugin config `externalPlanCommand: true` routes bare `/plan` to the registered
+command instead of the native picker (default `false`). In this opt-in, legacy
+`/plan on` and `/plan off` are blocked with artifact/autoApprove usage guidance;
+other arguments pass through unchanged. A stale native picker is closed and its
+keyboard/click callbacks cannot dispatch native controls. Help and completion
+describe project artifacts rather than advertising native mode switches.
+It treats `/plan` as a project-artifact command: native Plan is removed from the
+Shift+Tab cycle, and historical `plan/mode` events are ignored only for mode
+presentation/interpretation, without rewriting history. Real sandbox and approval
+policies remain effective; project `autoApprove` does not auto-approve permissions.
+With `false`, native Plan behavior is unchanged.
+Disable native plan-mode before registering a replacement that opens its scene.
+The flag grants no execution authority and implements no persistence.
+Native components remain available upstream; this is a reversible routing/UI
+override, not a mock-success handler or a deletion of native support. Run
+`pnpm run verify:external-plan` after upstream merges; this source-only regression
+gate is also included in `verify:build`. Source checks do not replace the normal
+build/render tests or updating the installed frontend.
+For a pre-build review, invoke the three gate scripts directly with `node`
+(see the `verify:external-plan` script in `package.json`): the package manager
+may install/prepare dependencies before `pnpm run`, triggering a local compile.
+
+Scenes receive `ui.Markdown`, `ui.markdownSourceRange` and `ui.markdownSourceBlocks`, also exported from
+`@deepseek-harness-tui/dsh-tui/ui`. Render with injected host React and
+`{ preserveSource: true, children: source }`; existing renderers/fallbacks apply.
+The helpers select exact 1-based source ranges with quoted context. Bind anchors
+to immutable revision/hash. Optional `sourceNavigation: { line, onSelect,
+commentLines, scrollRef }` adds a block cursor and mouse selection using the native
+renderer. List items are separate anchors; diagrams/tables/paragraphs retain their
+whole source block. Wrapped terminal rows are never treated as source lines.
+Use a vertical `ScrollBox` (`flexDirection: 'column'`) for scrollable artifacts;
+keep the Markdown root at the content origin when using its scroll anchor.
+Expanded managed-plan tool cards also render their human presentation as native
+Markdown; ordinary tools, error views, machine JSON and native size caps stay unchanged.
+The local managed-plan scene uses `c` to add/edit comments and `Esc` to save a
+comment draft. `d` asks for `y/n` confirmation before deleting a draft; its audit
+record remains. `O` reopens the current plan as a new staged revision of the same
+ID (already staged is a no-op). Historical revisions stay read-only, and reopened
+plans always require fresh owner approval before execution.
+
 > An interactive terminal UI for DeepSeek Harness. It ships a pixel-whale
 > header, live work status, streaming thinking, double-Esc time rewind, a
 > context progress bar, and a TPS gauge. Zero core changes: it consumes only
@@ -31,6 +73,40 @@ Compaction status stays on one line in narrow panes: phase and cancellation hint
 
 Image files referenced with `@path` use the same admission and resize/conversion policy as pasted images. Adjustment notices report the stored dimensions and format; required animation conversion is refused instead of dropping frames. Mention images and staged images still share count and stored-byte limits in source order.
 
+
+## OAuth provider retry policies
+
+The `dsh-tui-auth` entry accepts optional `retryPolicies`, keyed by mounted
+provider id. Omission preserves Harness defaults; `modelOverrides` remains
+independent. Unknown/unmounted provider keys and malformed policies fail at boot.
+For example, merge this into the entry's existing config (profile overrides
+replace the **whole** config, so retain existing `providers`, `credentialsFile`
+and `modelOverrides`):
+
+```yaml
+- id: dsh-tui-auth
+  config:
+    retryPolicies:
+      openai-codex:
+        mode: normal
+        maxRetries: 9
+        backoff:
+          initialDelayMs: 5000
+          maxDelayMs: 1200000
+          jitterRatio: 0.1
+```
+
+This is a provider-owned policy consumed by the official `llm-retry` plugin,
+which must be mounted by the agent's preset; it is not a request payload or a
+native Codex app-server setting. Only Codex changes in this example. Default
+transient error codes remain unchanged. Nine retries allow ten requests per
+failed-step sequence: nominal waits are 5, 10, 20, 40, 80, 160, 320, 640 and
+1200 seconds (41m15s total, plus request durations). Jitter makes the last wait
+18–20 minutes; an accepted provider Retry-After replaces the local delay, while
+one above the cap remains fail-fast in normal mode. Cancellation/disposal stays
+with the official runtime. Apply via a new process/remount, not a live retry
+budget change. Offline candidate regression:
+`node scripts/verify-oauth-retry-policies.mjs --compiled-root /absolute/candidate/types`.
 
 ## Highlights
 
@@ -426,6 +502,8 @@ Text, cursor position and staged image attachments on the launchpad or in chat w
 
 The goal bar stays on one summary line: hovering truncated goal text in fullscreen or split shows the whole objective, and a bare `/goal` prints the full status — objective, phase, rounds or budget, available commands — as a transcript block in the `/plugins` shape. Inline mode sees no pointer events, so that block is how its users read a long objective.
 
+With the Grammar Fix addon mounted, `Ctrl+G` corrects the draft without sending it. `Esc` or `Ctrl+C` cancels the correction; `Ctrl+Z` restores the previous draft. Without the addon, `Ctrl+G` keeps its default external-editor action (`$VISUAL` / `$EDITOR`). While the addon owns `Ctrl+G`, choose another external-editor shortcut in `/settings`.
+
 While the model is working: `Enter` steers, `Tab` queues a follow-up, `Ctrl+Enter` interrupts and sends. Input that names a command is still a command — with or without arguments — so `/model` or `/new` reach their own gate (and the `/` overlay sinks the commands that affect the running conversation) instead of silently becoming an interruption; only text that is not a command — and a direct skill gesture such as `/skill-name …` — steers.
 
 When DSH ends a turn because its session was disposed, the transcript shows “Session stopped”; user interruption keeps its existing prompt for what to do next. This describes the reported stop reason and does not recover a stuck session or its queued inputs.
@@ -514,6 +592,8 @@ PID reuse across platforms.
 **Background jobs**: card headers open the focused task panel. Click the card body or use `Ctrl+O` to toggle the command between its first statement and full script. Commands and output use separate colored edges with `❯` (`>` on Windows) and `≡` on their first rows; output always stays at the latest two visible rows. `/jobs` and the side panel keep the full output scrollable, while `e` toggles the focused command. Consecutive blank script lines collapse to one.
 
 **Background sessions**: On the DSH backend, `/bg` or `←` on an empty prompt backgrounds the current session and opens the session manager; `Esc` returns to it. Background sessions run in this process and stop when the TUI exits. Logs survive. On Claude/Codex, those entries open the session manager without backgrounding the session.
+
+On DSH, questionnaires from sessions whose background handles belong to this TUI remain answerable after `/bg`. The existing question panel can interrupt the session manager, and a pending question survives returning to its session. Other terminals' agents are not claimed.
 
 Full commands: [Interaction and commands](docs/interaction.en.md).
 

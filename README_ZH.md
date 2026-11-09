@@ -18,6 +18,39 @@
 
 # dsh-TUI
 
+### 托管计划插件接缝（本地源码扩展）
+
+插件配置 `externalPlanCommand: true` 让裸 `/plan` 调用注册命令而非原生选择器。
+默认 `false`。启用后，旧 `/plan on` 和 `/plan off` 会被阻止，并提示产物浏览与
+autoApprove 的正确用法；其他参数原样转发。残留的原生选择器会关闭，键盘与点击
+回调不会派发原生控制。帮助与补全描述项目产物，不再宣传原生模式切换。
+启用后，`/plan` 是项目计划产物命令：原生 Plan
+不再出现在 Shift+Tab 循环中，历史 `plan/mode` 事件仅在模式呈现与解释时被忽略，
+不会改写历史。真实 sandbox 与审批策略仍然有效；项目 `autoApprove` 不会自动批准权限。
+设为 `false` 时，原生 Plan 行为不变。注册打开场景的替代命令前禁用原生 plan-mode。
+此开关不授予执行权限，也不实现持久化。
+上游原生组件仍然保留：这是可逆的路由/UI 覆盖，不是伪造成功的 mock，也不是删除
+原生支持。合并上游后运行 `pnpm run verify:external-plan`；此源码回归也已加入
+`verify:build`。源码检查不能替代常规构建/渲染验证或更新已安装的 frontend。
+构建前审查请直接用 `node` 执行三个门禁脚本（见 `package.json` 的
+`verify:external-plan`）：包管理器可能在 `pnpm run` 前安装/prepare 依赖，
+从而触发本地编译。
+
+场景收到 `ui.Markdown`、`ui.markdownSourceRange` 与 `ui.markdownSourceBlocks`，也可从
+`@deepseek-harness-tui/dsh-tui/ui` 导入。使用注入的宿主 React，传入
+`{ preserveSource: true, children: source }`，复用原生渲染器及回退。
+辅助函数选择从 1 开始的源行范围及引用文本；锚点需绑定不可变版本与哈希。
+可选 `sourceNavigation: { line, onSelect, commentLines, scrollRef }` 通过原生渲染器
+增加块光标及鼠标选择。列表项单独定位；图表、表格及段落保持完整源块。
+终端折行绝不作为源行。可滚动文档使用纵向 `ScrollBox`（`flexDirection: 'column'`）；
+使用滚动锚点时，Markdown 根节点应位于内容原点。
+展开后的托管计划工具卡用原生 Markdown 渲染人类可读结果；其他工具、错误视图、
+模型 JSON 与原生大小限制保持不变。
+本地托管计划场景用 `c` 添加/编辑评论，`Esc` 保存评论草稿。
+`d` 在删除草稿前要求 `y/n` 确认，保留审计记录。
+`O` 将当前计划以相同 ID 的新版本重新放入 staging（已在 staging 则不新增版本）。
+历史版本只读；重新打开的计划必须再次获得所有者批准，才能执行。
+
 > 面向 DeepSeek Harness 的交互式终端界面：像素鲸鱼顶栏、实时工作状态、流式思考展示、双击 Esc 时间回溯、上下文进度条与 TPS 仪表。
 > 零核心改动，只消费 DSH 的公开导出；正从「挂载型插件」演进为拥有自身入口与组装根的终端应用，届时 DSH 作为首方后端在进程内加载。安装即启用，卸载不留核心补丁。
 回合空闲后，已完成目标自动从输入框上方隐藏；Todo 侧栏仍保留历史。`Ctrl+Q` 在工作中折叠待办，在空闲时隐藏／恢复目标与待办底部面板；空闲时点击待办标题也可隐藏。隐藏只影响当前展示，新目标／待办快照或会话会重新显示；`/goal clear` 不会清空待办。
@@ -26,6 +59,36 @@
 
 窄面板中的压缩状态保持单行：先省略阶段与取消提示，再缩短标签；计时只会完整显示，不拆开数字。
 
+
+## OAuth 提供商重试策略
+
+`dsh-tui-auth` 支持可选的 `retryPolicies`，按已挂载 provider id 配置。
+省略时保留 Harness 默认值，`modelOverrides` 独立生效。未知或未挂载的
+provider 键与非法策略会在启动时拒绝。将下例合入该行现有配置；profile
+覆盖会替换**整个** config，务必保留已有 `providers`、`credentialsFile`
+和 `modelOverrides`：
+
+```yaml
+- id: dsh-tui-auth
+  config:
+    retryPolicies:
+      openai-codex:
+        mode: normal
+        maxRetries: 9
+        backoff:
+          initialDelayMs: 5000
+          maxDelayMs: 1200000
+          jitterRatio: 0.1
+```
+
+这是官方 `llm-retry` 插件消费的 provider-owned 策略，agent preset 必须挂载
+该插件；不是请求 payload，也不是原生 Codex app-server 设置。此例仅改变
+Codex，默认瞬态错误码不变。每次失败 step 序列最多重试九次，共十次请求；
+名义等待为 5、10、20、40、80、160、320、640、1200 秒，总计 41 分 15 秒，
+另加请求耗时。抖动使最后等待为 18–20 分钟；可接受的 provider Retry-After
+替代本地等待，超过上限时 normal 模式仍快速失败。取消与卸载由官方运行时
+处理。通过新进程或重新挂载生效，不修改正在进行的重试预算。离线候选回归：
+`node scripts/verify-oauth-retry-policies.mjs --compiled-root /absolute/candidate/types`。
 
 ## 功能亮点
 
@@ -342,6 +405,8 @@ delegation provider 的已结算运行失败至少 2 次、且不低于一半时
 
 目标栏保留单行摘要：fullscreen/分栏下悬停被截断的目标正文可看全文；裸 `/goal` 会把完整状态（目标全文、阶段、轮次或预算、可用命令）按 `/plugins` 同款打印成转录块。inline 模式收不到指针事件，长目标就靠这个块读。
 
+挂载 Grammar Fix 插件后，`Ctrl+G` 修正草稿但不发送。`Esc` 或 `Ctrl+C` 取消修正，`Ctrl+Z` 恢复原草稿。未挂载插件时，`Ctrl+G` 保留默认外部编辑器动作（`$VISUAL` / `$EDITOR`）。插件占用 `Ctrl+G` 时，可在 `/settings` 为外部编辑器设置其他快捷键。
+
 模型工作时：`Enter` 加塞、`Tab` 排队、`Ctrl+Enter` 打断并立即发送。输入只要构成命令就仍按命令执行（带不带参数都一样）——`/model`、`/new` 会走到该命令自己的门禁（`/` 浮窗也据此把影响当前对话的命令沉到灰区），不会被当成插话；只有不构成命令的文本和直接调用技能的手势（`/技能名 …`）才加塞。
 
 DSH 因会话被释放而结束回合时，转录显示“会话已停止”；用户主动中断仍保留询问下一步的提示。这仅呈现上游报告的停止原因，不恢复卡住的会话或其排队输入。
@@ -427,6 +492,8 @@ Linux 下，旧 PID 被非主线程复用时，可回收残留的 TUI 会话占�
 **后台任务**：点击卡片头部可直达该任务详情。点击卡片正文或按 `Ctrl+O`，切换命令首句预览与完整脚本；命令和输出分别使用不同色边，节首标记为 `❯`（Windows 用 `>`）和 `≡`。输出固定显示最新两个可视行。`/jobs` 与侧栏任务面板保留全量输出滚动，按 `e` 切换焦点命令的折/展；脚本连续空行压缩为一行。
 
 **后台会话**：在 DSH 内核，`/bg` 或空输入按 `←` 将当前会话转后台并打开会话管理；按 `Esc` 回到它。后台会话跑在本进程内，TUI 退出即停止，日志保留。在 Claude/Codex 内核，这两个入口直接打开会话管理，不转后台。
+
+DSH 中，后台 handle 仍由本 TUI 持有的会话在 `/bg` 后继续接受问卷。现有问卷面板可覆盖会话管理界面，返回原会话不会丢失待答问题；不接管其他终端的代理。
 
 完整命令：[交互与命令](docs/interaction.md)。
 
