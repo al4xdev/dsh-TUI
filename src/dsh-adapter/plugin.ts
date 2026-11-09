@@ -1641,9 +1641,10 @@ export async function apply(ctx: Context, runtimeConfig: RuntimeConfig<Config>, 
   }
   bindToastSink()
   if (questionSeams?.registration.kind === 'waterfall') {
-    // Ownership follows the mutable channel; registration cleanup belongs to
-    // this Cordis fiber.
-    questionSeams.registration.register(channel)
+    // The raw channel owns the foreground and parked handles; the UI facade
+    // is a different object and must not lose that background ownership.
+    // Registration cleanup belongs to this Cordis fiber.
+    questionSeams.registration.register(rawChannel)
   }
   // Fullscreen layout decision: the settings user layer (edited through the
   // /settings screen) overrides cordis.yml when set. The settings injection
@@ -3353,7 +3354,9 @@ export async function apply(ctx: Context, runtimeConfig: RuntimeConfig<Config>, 
         await installPresets(dshCtx)
         const seams = mountDshQuestionSeams(dshCtx)
         if (seams.notice !== undefined) notifyChannel(seams.notice, { color: 'error' })
-        if (seams.registration.kind === 'waterfall') seams.registration.register(channel)
+        // Same owner as the boot registration: the raw channel holds the
+        // background-handle ledger, the UI facade does not.
+        if (seams.registration.kind === 'waterfall') seams.registration.register(rawChannel)
         mountDshApprovals(dshCtx)
         refreshHostServices()
       },

@@ -23,6 +23,16 @@ export interface QuestionAnswerer {
   ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer>
 }
 
+const hostedQuestionAgents = new WeakMap<object, (agentId: string) => boolean>()
+
+/** Read the channel's live handle ledger, never the process-wide agent roster. */
+export function bindHostedQuestionAgents(owner: object, ownsAgent: (agentId: string) => boolean): () => void {
+  hostedQuestionAgents.set(owner, ownsAgent)
+  return () => {
+    if (hostedQuestionAgents.get(owner) === ownsAgent) hostedQuestionAgents.delete(owner)
+  }
+}
+
 interface LegacyUserQuestionService {
   registerProvider(provider: QuestionAnswerer): () => void
 }
@@ -57,7 +67,8 @@ function hasLegacyProvider(service: unknown): service is LegacyUserQuestionServi
  * Prepare the answerer against whichever upstream API the active package
  * exposes. The legacy path registers immediately and binds the returned
  * disposer to this TUI fiber. The waterfall path returns a late binder because
- * channel.agentId changes across `/new`, `/resume`, and rewind.
+ * channel.agentId changes across `/new`, `/resume`, and rewind; `/bg` also
+ * leaves the previous agent in this channel's owned background-handle ledger.
  *
  * Agentless waterfall requests are claimed deliberately: dsh-auth's `/auth`
  * wizard asks through the same service without an agent. Foreign-agent
@@ -85,7 +96,10 @@ export function prepareQuestionAnswerer(
     return {
       kind: 'waterfall',
       register: owner => events.on('user-questions/request', (request, next) => {
-        if (request.agent !== undefined && String(request.agent.id) !== owner.agentId) return next()
+        if (request.agent !== undefined) {
+          const agentId = String(request.agent.id)
+          if (agentId !== owner.agentId && hostedQuestionAgents.get(owner)?.(agentId) !== true) return next()
+        }
         return answerer.ask(request)
       }),
     }

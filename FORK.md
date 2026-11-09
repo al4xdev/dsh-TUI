@@ -20,3 +20,9 @@ git push --force-with-lease origin custom
 Then bump the TUI pin in dsh-customs `tools/clean-install/forks-manifest.json`.
 
 ## Fork features
+
+### Background question ownership
+
+On DSH, questionnaires from sessions whose background handles belong to this TUI
+remain answerable after `/bg`. Other terminals' agents are not claimed.
+Upstream candidate (bug fix).
