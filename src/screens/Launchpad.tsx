@@ -7,6 +7,7 @@ import { OverlayAbove } from '../components/OverlayAbove.js'
 import { CommandSuggestions } from '../components/CommandSuggestions.js'
 import type { CommandCompletion } from '../commands.js'
 import { LogoV2 } from '../components/LogoV2.js'
+import { createGrammarFixPresentation, grammarFixSuccess, type GrammarFixBridge, type GrammarFixPresentation } from '../components/grammarFixPresentation.js'
 import type { Brand } from '../branding.js'
 import { resolveLaunchpadLayout, type LaunchpadLayout } from '../components/launchpadLayout.js'
 import { type LaunchpadAction } from '../components/launchpadActions.js'
@@ -23,6 +24,7 @@ import { stringWidth } from '../ink/stringWidth.js'
 import { isMod, isPlainReturn } from '../utils/modifiers.js'
 import { wordBoundaryLeft, wordBoundaryRight } from '../utils/inputWordBoundary.js'
 import { actionMatches } from '../utils/keymap.js'
+import { editInExternalEditor } from '../utils/externalEditor.js'
 import { formatClipboardInsert, readClipboard, type ClipboardRead } from '../utils/clipboard.js'
 import { imagePathMediaType, parsePastedImagePath, readBoundedRegularFile, stageClipboardFilePaths } from '../utils/pastedImagePath.js'
 import type { ChannelUi } from '../adapter/channel/ui-policy.js'
@@ -426,6 +428,7 @@ export function Launchpad({
   inputPaused = false,
   onParamPick,
   model,
+  provider,
   effort,
   preset,
   permission,
@@ -513,6 +516,7 @@ export function Launchpad({
    * 就整行不画（成组行矮一行，见 `resolveLaunchpadLayout` 的 `params`）。
    */
   model?: string | undefined
+  provider?: string | undefined
   effort?: string | undefined
   /** 当前 agent preset 的显示名（Standard/PTC/极简…）；缺省不画那一段。 */
   preset?: string | undefined
@@ -624,6 +628,8 @@ export function Launchpad({
   // 用**当时最新**的 query/caret（PromptInput 用 revision 守同一条；这里没有
   // 本地 state，用每次渲染刷新的 refs 守），不能吃按键那一刻的闭包旧值。
   const queryRef = React.useRef(query)
+  const queryRevisionRef = React.useRef(0)
+  if (queryRef.current !== query) queryRevisionRef.current++
   queryRef.current = query
   const caretRef = React.useRef(caret)
   caretRef.current = caret
@@ -661,16 +667,34 @@ export function Launchpad({
           && (channel.stagedImageGeneration?.() ?? 0) === imageGeneration)),
     }
   }
+  const alexGrammarAbort = React.useRef<AbortController | null>(null)
+  const alexEditorBusy = React.useRef(false)
+  const alexGrammarUndo = React.useRef<string | null>(null)
+  const [grammarPresentation, setGrammarPresentation] = React.useState<GrammarFixPresentation | null>(null)
+  const grammarRevisionRef = React.useRef<number | null>(null)
+  const cancelGrammarFix = (notify: boolean): void => {
+    if (!alexGrammarAbort.current || grammarRevisionRef.current === null) return
+    alexGrammarAbort.current.abort()
+    alexGrammarAbort.current = null
+    grammarRevisionRef.current = null
+    alexEditorBusy.current = false
+    setGrammarPresentation(null)
+    if (notify) showPasteNotice(t('grammar-canceled'))
+  }
+  React.useEffect(() => {
+    if (grammarRevisionRef.current !== null && (inputPaused || grammarRevisionRef.current !== queryRevisionRef.current)) cancelGrammarFix(false)
+  }, [query, inputPaused])
+  React.useEffect(() => () => alexGrammarAbort.current?.abort(), [])
   /** 粘贴提示：落地页没有 toast 基础设施，借 Tips 行显示 4 秒（失败不能静默）。 */
   const [pasteNotice, setPasteNotice] = React.useState<string | undefined>(undefined)
   const noticeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const showPasteNotice = (message: string): void => {
+  const showPasteNotice = (message: string, durationMs = 4000): void => {
     setPasteNotice(message)
     if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current)
     const timer = setTimeout(() => {
       noticeTimerRef.current = null
       setPasteNotice(undefined)
-    }, 4000)
+    }, durationMs)
     ;(timer as { unref?: () => void }).unref?.()
     noticeTimerRef.current = timer
   }
@@ -678,9 +702,14 @@ export function Launchpad({
     if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current)
   }, [])
   /** Tips 行此刻被哪条提示占用（粘贴提示优先于 channel 通知）。 */
-  const rowNotice = pasteNotice !== undefined
-    ? { text: pasteNotice, color: 'warning' as const }
-    : notice
+  // A running grammar fix takes the Tips row: resolveLaunchpadLayout budgets
+  // no extra rows, and the composer's three-line activity block overlapped
+  // the wordmark here.
+  const rowNotice = grammarPresentation !== null
+    ? { text: `${t('grammar-correcting')} (${grammarPresentation.language} · ${grammarPresentation.model}) · ${t('grammar-cancel-hint')}`, color: 'warning' as const }
+    : pasteNotice !== undefined
+      ? { text: pasteNotice, color: 'warning' as const }
+      : notice
   /** 单行插入（粘贴）：换行折叠成空格、`\r` 去掉——落地页是单行编辑器，
    *  多行内容不许拼出换行（Enter 才是提交）。落在当下光标处。 */
   const insertSingleLine = (text: string): void => {
@@ -885,6 +914,92 @@ export function Launchpad({
     }
     const query = queryRef.current
     const caret = caretRef.current
+    if (alexEditorBusy.current) {
+      event?.stopImmediatePropagation()
+      if (key.escape || (key.ctrl && input === 'c')) cancelGrammarFix(true)
+      else if (grammarRevisionRef.current !== null && key.ctrl && input === 'g') showPasteNotice(t('grammar-busy'))
+      return
+    }
+    if (key.ctrl && !key.shift && input === 'z' && alexGrammarUndo.current !== null) {
+      event?.stopImmediatePropagation()
+      const previous = alexGrammarUndo.current
+      alexGrammarUndo.current = null
+      changeQuery(previous, previous.length)
+      return
+    }
+    const grammar = (globalThis as Record<symbol, unknown>)[Symbol.for('alex.dsh.grammar-fix')] as GrammarFixBridge | undefined
+    const grammarPressed = input === 'g' && key.ctrl && !key.shift && !key.meta && !key.super
+      && (grammar !== undefined || !actionMatches('editor', input, key))
+    if (grammarPressed || actionMatches('editor', input, key)) {
+      event?.stopImmediatePropagation()
+      const commandMatch = query.match(/^(\s*\/\S+\s+)([\s\S]+)$/)
+      const isPureCommand = query.trimStart().startsWith('/') && (!commandMatch || !commandMatch[2].trim())
+      // Only the grammar fix needs text; the editor may start from an empty draft.
+      if (grammarPressed && (!query.trim() || isPureCommand)) return
+      if (grammarPressed && !grammar) {
+        showPasteNotice(t('grammar-unavailable'))
+        return
+      }
+      const original = query
+      const revision = queryRevisionRef.current
+      const abort = new AbortController()
+      alexGrammarAbort.current = abort
+      alexEditorBusy.current = true
+      void (async () => {
+        try {
+          if (grammarPressed) {
+            grammarRevisionRef.current = revision
+            setGrammarPresentation(createGrammarFixPresentation(grammar!.describe({ provider, model })))
+          }
+          const outcome = grammarPressed
+            ? { kind: 'edited' as const, text: await grammar!.fix(original, { provider, model }, abort.signal, (_message, metadata) => {
+              if (abort.signal.aborted || alexGrammarAbort.current !== abort) return
+              if (metadata) setGrammarPresentation(current => current ? {
+                ...current,
+                language: metadata.language ?? current.language,
+                model: metadata.model ?? current.model,
+              } : current)
+            }) }
+            : await editInExternalEditor(original)
+          if (abort.signal.aborted || queryRevisionRef.current !== revision) return
+          if (outcome.kind === 'edited') {
+            // The launchpad is a single-line editor (same rule as paste):
+            // an editor or model result must not smuggle newlines in.
+            const text = collapseToSingleLine(outcome.text)
+            alexGrammarUndo.current = original
+            changeQuery(text, text.length)
+            showPasteNotice(grammarPressed ? grammarFixSuccess(text === original) : t('grammar-draft-updated'))
+            const meta = grammar?.describe({ provider, model })
+            if (grammarPressed && meta?.naturalTips && typeof grammar?.suggestTip === 'function') {
+              void (async () => {
+                try {
+                  const tip = await grammar!.suggestTip!(original, outcome.text, { provider, model }, abort.signal)
+                  if (abort.signal.aborted || queryRevisionRef.current !== revision || !tip?.trim()) return
+                  showPasteNotice(tip.trim(), 8000)
+                } catch {
+                  // Tip failure is silent
+                }
+              })()
+            }
+          } else if (outcome.kind === 'unavailable') showPasteNotice(t('input-editor-unavailable'))
+          else if (outcome.kind === 'failed') showPasteNotice(t('input-editor-failed', { name: outcome.message }))
+          // 'unchanged' (saved as-is or aborted) stays silent, as in the composer.
+        } catch (error: unknown) {
+          if (!abort.signal.aborted) {
+            const err = error as { message?: string }
+            showPasteNotice(String(err?.message ?? error))
+          }
+        } finally {
+          if (alexGrammarAbort.current === abort) {
+            alexGrammarAbort.current = null
+            grammarRevisionRef.current = null
+            alexEditorBusy.current = false
+            setGrammarPresentation(null)
+          }
+        }
+      })()
+      return
+    }
     const composing = key.ctrl || key.meta || key.super
     // 终端原生粘贴（bracketed paste：Ctrl+Shift+V / 右键 / Shift+Insert）：
     // ink 把载荷标成 isPasted 交给 useInput；标记字节（\x1b[200~ / 201~）在

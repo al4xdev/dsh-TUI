@@ -64,3 +64,12 @@ Expanded, settled results of `plan_read`, `plan_stage`, `plan_reopen`,
 `plan_close`, `plan_list` and `exit_plan_mode` render as Markdown. Other tools,
 errors and machine JSON stay unchanged. Upstream has no tool-result renderer
 seam for plugins.
+
+### Grammar fix on `Ctrl+G`
+
+With the dsh-customs `grammar-fix` addon mounted (it publishes a bridge on
+`globalThis[Symbol.for('alex.dsh.grammar-fix')]`), `Ctrl+G` corrects the draft
+in the composer and on the launchpad without sending it. `Esc`/`Ctrl+C` cancels;
+on the launchpad `Ctrl+Z` restores the previous draft. Without the addon,
+`Ctrl+G` keeps the external-editor action. Upstream has no draft-editing seam
+for plugins yet, and `Ctrl+G` is reserved for built-ins.
