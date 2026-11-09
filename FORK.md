@@ -57,3 +57,10 @@ Plugin config `externalPlanCommand: true` (default `false`) treats the registry
 Disable native `plan-mode` in every preset. The flag does not filter native
 plan-mode events. Regression (not in `package.json`, to avoid conflicts):
 `node --import tsx/esm scripts/verify-external-plan.ts`.
+
+### Managed-plan tool results as Markdown
+
+Expanded, settled results of `plan_read`, `plan_stage`, `plan_reopen`,
+`plan_close`, `plan_list` and `exit_plan_mode` render as Markdown. Other tools,
+errors and machine JSON stay unchanged. Upstream has no tool-result renderer
+seam for plugins.
