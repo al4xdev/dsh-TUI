@@ -42,3 +42,18 @@ Full-screen scenes receive `ui.Markdown`, `ui.markdownSourceRange` and
 commentLines, scrollRef }` adds a block cursor and mouse selection; list items
 are separate anchors, wrapped terminal rows are never source lines. Used by the
 dsh-customs `managed-plans` scene.
+
+### External `/plan` command
+
+Plugin config `externalPlanCommand: true` (default `false`) treats the registry
+`/plan` as an external command instead of native plan mode:
+
+- `/plan …` runs the registered command verbatim (no on/off picker, no `on`
+  normalization); the command owns its grammar and refusals.
+- `/plan` completions come from the command's `tuiCommandTrees` provider.
+- The Shift+Tab cycle drops plan-entering modes and strips the `plan` atom from
+  the rest, so it never dispatches `/plan` or `/plan off`.
+
+Disable native `plan-mode` in every preset. The flag does not filter native
+plan-mode events. Regression (not in `package.json`, to avoid conflicts):
+`node --import tsx/esm scripts/verify-external-plan.ts`.

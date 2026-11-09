@@ -175,7 +175,9 @@ export function createCommandCompletions(deps: {
           getHiddenTemporarySidePanels(),
         ).map(id => ({ name: id, description: `Open the ${id} panel`, descriptionKey: 'sugg-panel-id-desc' as const })),
       ]
-      if (path.length === 1 && path[0] === 'plan') return [
+      // An external /plan owns its children: it registers them through
+      // tuiCommandTrees, reached by the fallback below.
+      if (path.length === 1 && path[0] === 'plan' && !state.externalPlanCommand) return [
         { name: 'on', description: 'Enter plan mode: read-only, plan before acting', descriptionKey: 'plan-mode-on-desc' },
         { name: 'off', description: 'Exit plan mode, back to normal execution', descriptionKey: 'plan-mode-off-desc' },
       ]

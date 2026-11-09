@@ -4176,6 +4176,13 @@ export function Chat({
         // through to the model, exactly as before.
         const plan = channel.capabilities().plan
         const mounted = plan.route !== 'none'
+        // Deployment opt-in: the registry /plan is an external command, not
+        // dsh-plan-mode (registry presence alone cannot tell them apart). It
+        // owns its whole grammar, so no picker and no `on` normalization.
+        if (mounted && channel.externalPlanCommand) {
+          setHelpOpen(false)
+          return runExternalCommand('plan', rawInput, images)
+        }
         const parts = rawInput.trim().split(/\s+/).filter(Boolean)
         const argument = parts.length === 1 && parts[0] === 'on' ? '' : rawInput
         if (mounted && parts.length === 0) {

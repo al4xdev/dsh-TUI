@@ -34,7 +34,7 @@ import { channelCapabilities } from '../../channel/capabilities.js'
 import { isCommandCompletionToken, LOCAL_COMMANDS, type LocalCommand } from '../../commands.js'
 import { touchSession } from '../../sessionHistory.js'
 import { snapshotLiveSessionEvents } from '../compat/liveSession.js'
-import { DEFAULT_SESSION_MODES, resolveSessionModes } from '../../sessionModes.js'
+import { DEFAULT_SESSION_MODES, resolveSessionModes, type SessionModeSpec } from '../../sessionModes.js'
 import { installedMeetsVersion } from '../contract.js'
 import { createDshSession } from '../backend/session.js'
 import { createDshTranslator, dshPricingWindow } from '../backend/translate.js'
@@ -118,6 +118,9 @@ export function attachDshExtensions(
   options: ChannelLaunchOptions,
 ): void {
   const { state, owner, rowIds, host, notify } = core
+  // The initial view copied the boot value; the package entry learns the
+  // row's `externalPlanCommand` only now (a late-bound launch option).
+  state.externalPlanCommand = options.externalPlanCommand === true
   const { workspaceService, commandTrees } = host
   const adapterRuntime = host.adapterRuntime
   const registeredSettingsSections = state.settingsSections
@@ -236,9 +239,20 @@ export function attachDshExtensions(
   const { modes: resolvedConfiguredSessionModes, dropped: droppedModeIds } = resolveSessionModes(options.modes)
   const filteredConfiguredSessionModes = resolvedConfiguredSessionModes
     .filter(spec => spec.permission === undefined || isCommandCompletionToken(spec.permission))
-  const configuredSessionModes = filteredConfiguredSessionModes.length > 0
+  const cycleModes = filteredConfiguredSessionModes.length > 0
     ? filteredConfiguredSessionModes
     : DEFAULT_SESSION_MODES
+  // An external /plan is not native plan mode: Shift+Tab must never dispatch
+  // it. Plan-entering modes leave the cycle and the rest lose their `plan`
+  // atom, or a `plan: false` mode would send `/plan off` to the external
+  // command on a session whose log still holds a native plan/mode event.
+  const withoutNativePlan = (modes: readonly SessionModeSpec[]): SessionModeSpec[] =>
+    modes.filter(spec => spec.plan !== true).map(({ plan: _plan, ...spec }) => spec)
+  // A cycle of plan-only modes would end empty; the stock cycle minus plan
+  // keeps index 0 defined.
+  const configuredSessionModes = options.externalPlanCommand !== true
+    ? cycleModes
+    : withoutNativePlan(cycleModes).length > 0 ? withoutNativePlan(cycleModes) : withoutNativePlan(DEFAULT_SESSION_MODES)
   if (droppedModeIds.length > 0) {
     ctx.logger.warn(
       `dsh-tui: session modes ${droppedModeIds.map(id => `"${id}"`).join(', ')} declare no plan/sandbox/approval/permission atom; dropped from the Shift+Tab cycle`,

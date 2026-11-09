@@ -1425,7 +1425,7 @@ export async function apply(ctx: Context, runtimeConfig: RuntimeConfig<Config>, 
   // set in `attachDsh` before adoption; the getters below serve them.
   const rowFacts: {
     route?: { readonly provider: string; readonly model: string }
-    config?: Pick<Config, 'provider' | 'model' | 'preset' | 'effort' | 'modes' | 'upstreamRetry' | 'updateCheck'>
+    config?: Pick<Config, 'provider' | 'model' | 'preset' | 'effort' | 'modes' | 'upstreamRetry' | 'updateCheck' | 'externalPlanCommand'>
   } = {}
   /**
    * The in-process DSH kernel's `/new` while no DSH session was adopted (its
@@ -1500,6 +1500,9 @@ export async function apply(ctx: Context, runtimeConfig: RuntimeConfig<Config>, 
     // Raw cordis.yml `lang` / `activityFrames`: /reload must not override a
     // static deployment choice with the persisted preference.
     configuredLang: config.lang,
+    // Late-bound like `modes`: the package entry learns its row's config only
+    // when the row attaches, before the DSH extensions read this.
+    get externalPlanCommand() { return rowFacts.config === undefined ? config.externalPlanCommand : rowFacts.config.externalPlanCommand },
     configuredActivityFrames: config.activityFrames,
     // Read when the DSH extensions attach (the adoption), after the row's
     // facts are in; the display fields below are fixed at the first frame.
